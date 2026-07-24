@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "app-windows-94a70f555e",
+  "repository": "yumingyuan2/Pake",
+  "sourceBranch": "master",
+  "runner": "windows-latest",
+  "os": "windows",
+  "online": true,
+  "operation": "enable-or-update",
+  "releaseTag": "pake-online-app-windows-94a70f555e",
+  "cliConfig": {
+    "url": "https://xzexpress.092714.xyz/",
+    "name": "小振快递",
+    "icon": "https://xzexpress.092714.xyz/assets/xiaozhen-avatar.jpg",
+    "width": 1200,
+    "height": 780,
+    "minWidth": 0,
+    "minHeight": 0,
+    "appVersion": "1.0.0",
+    "targets": "msi",
+    "fullscreen": false,
+    "hideTitleBar": false,
+    "multiArch": false
+  },
+  "delivery": {
+    "windowsOfflineExe": false,
+    "onlineWindowsFormat": "msi",
+    "offlineExeIcon": null,
+    "onlineExeIcon": "https://xzexpress.092714.xyz/assets/xiaozhen-avatar.jpg"
+  },
+  "createdAt": "2026-07-24T09:02:58.037Z",
+  "updatedAt": "2026-07-24T09:02:58.037Z"
+}
