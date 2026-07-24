@@ -1,0 +1,20 @@
+<Updates>
+ <ApplicationName>{AnyApplication}</ApplicationName>
+ <ApplicationVersion>1.0.0</ApplicationVersion>
+ <Checksum>true</Checksum>
+ <PackageUpdate>
+  <Name>org.pake.online.2b2t.shop.windows.2b3216565a</Name>
+  <DisplayName>2b2t.Shop</DisplayName>
+  <Description>Latest verified 2b2t.Shop build from master.</Description>
+  <Version>3.15.1.40</Version>
+  <ReleaseDate>2026-07-24</ReleaseDate>
+  <Default>true</Default>
+  <ForcedInstallation>true</ForcedInstallation>
+  <Script>installscript.qs</Script>
+  <UpdateFile CompressedSize="2517361" OS="Any" UncompressedSize="9034280"/>
+  <DownloadableArchives>content.7z</DownloadableArchives>
+  <SHA1>cacccfc06696c5d89f7a0d544b8f1aa47202d47c</SHA1>
+ </PackageUpdate>
+ <SHA1>cacccfc06696c5d89f7a0d544b8f1aa47202d47c</SHA1>
+ <MetadataName>2026-07-24-0607_meta.7z</MetadataName>
+</Updates>
