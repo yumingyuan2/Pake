@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "2b2t-shop-windows-2b3216565a",
+  "repository": "yumingyuan2/Pake",
+  "sourceBranch": "master",
+  "runner": "windows-latest",
+  "os": "windows",
+  "online": true,
+  "operation": "enable-or-update",
+  "releaseTag": "pake-online-2b2t-shop-windows-2b3216565a",
+  "cliConfig": {
+    "url": "https://2b2t.shop",
+    "name": "2b2t.Shop",
+    "icon": "https://raw.githubusercontent.com/yumingyuan2/Rainy-Public-Storage/refs/heads/main/IconGroup32512.ico",
+    "width": 1200,
+    "height": 780,
+    "minWidth": 0,
+    "minHeight": 0,
+    "appVersion": "1.0.0",
+    "targets": "msi",
+    "fullscreen": false,
+    "hideTitleBar": false,
+    "multiArch": false
+  },
+  "delivery": {
+    "windowsOfflineExe": false,
+    "offlineExeIcon": null,
+    "onlineExeIcon": "https://raw.githubusercontent.com/yumingyuan2/Rainy-Public-Storage/refs/heads/main/IconGroup32512.ico"
+  },
+  "createdAt": "2026-07-24T01:02:25.916Z",
+  "updatedAt": "2026-07-24T01:02:25.916Z"
+}
