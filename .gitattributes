@@ -7,6 +7,9 @@ docs/**/*                 linguist-vendored
 .github/**/*              linguist-vendored
 node_modules/**/*         linguist-vendored
 
+# Keep executable ESM scripts parseable after Windows checkouts.
+scripts/pake-online/*.mjs text eol=lf
+
 # Exclude build artifacts and config files
 /cli.js                   linguist-vendored
 /rollup.config.js         linguist-vendored
