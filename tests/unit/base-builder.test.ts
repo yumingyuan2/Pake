@@ -336,8 +336,9 @@ describe('BaseBuilder guards', () => {
 
   it('uses a raw Windows executable for an online payload build', () => {
     if (process.platform !== 'win32') return;
-    const builder = new TestBuilder({
+    const builder = new WinBuilder({
       debug: false,
+      name: 'Online Payload',
       targets: 'msi',
     } as any);
     process.env.PAKE_WINDOWS_ONLINE_PAYLOAD = '1';

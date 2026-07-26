@@ -1492,6 +1492,9 @@ class BaseBuilder {
         if (features.length > 0) {
             fullCommand += ` --features ${features.join(',')}`;
         }
+        if (this.isWindowsOnlinePayloadBuild()) {
+            fullCommand += ' --no-bundle';
+        }
         return fullCommand;
     }
     getBuildFeatures() {
@@ -1512,9 +1515,6 @@ class BaseBuilder {
         // Use temporary config directory to avoid modifying source files
         const configPath = path.join(npmDirectory, 'src-tauri', '.pake', 'tauri.conf.json');
         let fullCommand = this.buildBaseCommand(packageManager, configPath);
-        if (this.isWindowsOnlinePayloadBuild()) {
-            fullCommand += ' --no-bundle';
-        }
         // For macOS, use app bundles by default unless DMG is explicitly requested
         if (IS_MAC && this.options.targets === 'app') {
             fullCommand += ' --bundles app';
