@@ -9,7 +9,7 @@
   "operation": "enable-or-update",
   "releaseTag": "pake-online-2b2t-shop-windows-2b3216565a",
   "cliConfig": {
-    "url": "https://2b2t.shop",
+    "url": "https://2b2t.shop/",
     "name": "2b2t.Shop",
     "icon": "https://raw.githubusercontent.com/yumingyuan2/Rainy-Public-Storage/refs/heads/main/IconGroup32512.ico",
     "width": 1200,
@@ -24,9 +24,10 @@
   },
   "delivery": {
     "windowsOfflineExe": false,
+    "onlineWindowsFormat": "exe",
     "offlineExeIcon": null,
     "onlineExeIcon": "https://raw.githubusercontent.com/yumingyuan2/Rainy-Public-Storage/refs/heads/main/IconGroup32512.ico"
   },
   "createdAt": "2026-07-24T01:02:25.916Z",
-  "updatedAt": "2026-07-24T01:02:25.916Z"
+  "updatedAt": "2026-07-26T05:07:00.936Z"
 }
