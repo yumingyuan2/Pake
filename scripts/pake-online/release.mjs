@@ -153,9 +153,11 @@ export function selectReleaseAssetsToDelete(assets, manifests, assetPrefix) {
     const manifest = manifests.get(asset.name);
     if (!manifest) continue;
     for (const artifact of manifest.artifacts ?? []) keep.add(artifact.name);
-    if (manifest.onlineInstaller?.name) {
-      keep.add(manifest.onlineInstaller.name);
-    }
+  }
+
+  const latestManifest = manifests.get(keptManifestAssets[0]?.name);
+  if (latestManifest?.onlineInstaller?.name) {
+    keep.add(latestManifest.onlineInstaller.name);
   }
 
   return assets.filter((asset) => {

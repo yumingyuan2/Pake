@@ -360,6 +360,43 @@ describe("Pake online release assets", () => {
       "example-windows-id-old.exe.zip",
     ]);
   });
+
+  it("removes the previous online installer when its format changes", () => {
+    const assets = [
+      { id: 6, name: "pake-online-manifest-new.json" },
+      { id: 5, name: "pake-online-manifest-previous.json" },
+      { id: 4, name: "example-windows-id-new.exe.zip" },
+      { id: 3, name: "example-windows-id-previous.exe.zip" },
+      { id: 2, name: "example-windows-id-online-installer.exe" },
+      { id: 1, name: "example-windows-id-online-installer.msi" },
+    ];
+    const manifests = new Map([
+      [
+        "pake-online-manifest-new.json",
+        {
+          artifacts: [{ name: "example-windows-id-new.exe.zip" }],
+          onlineInstaller: {
+            name: "example-windows-id-online-installer.exe",
+          },
+        },
+      ],
+      [
+        "pake-online-manifest-previous.json",
+        {
+          artifacts: [{ name: "example-windows-id-previous.exe.zip" }],
+          onlineInstaller: {
+            name: "example-windows-id-online-installer.msi",
+          },
+        },
+      ],
+    ]);
+
+    expect(
+      selectReleaseAssetsToDelete(assets, manifests, "example-windows-id").map(
+        ({ name }) => name,
+      ),
+    ).toEqual(["example-windows-id-online-installer.msi"]);
+  });
 });
 
 describe("Windows installer icon preparation", () => {
