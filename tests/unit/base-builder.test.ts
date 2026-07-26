@@ -328,10 +328,16 @@ describe('BaseBuilder guards', () => {
     } as any);
 
     delete process.env.PAKE_ONLINE_BOOTSTRAP;
-    expect((builder as any).getBuildFeatures()).toEqual(['cli-build']);
+    const platformFeatures = (builder as any).getBuildFeatures();
+    expect(platformFeatures).toContain('cli-build');
+    expect(platformFeatures).not.toContain('online-bootstrap');
 
     process.env.PAKE_ONLINE_BOOTSTRAP = '1';
-    expect((builder as any).getBuildFeatures()).toContain('online-bootstrap');
+    const onlineFeatures = (builder as any).getBuildFeatures();
+    expect(onlineFeatures).toContain('online-bootstrap');
+    expect([...onlineFeatures].sort()).toEqual(
+      [...platformFeatures, 'online-bootstrap'].sort(),
+    );
   });
 
   it('uses a raw Windows executable for an online payload build', () => {
