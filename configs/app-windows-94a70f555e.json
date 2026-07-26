@@ -24,10 +24,10 @@
   },
   "delivery": {
     "windowsOfflineExe": false,
-    "onlineWindowsFormat": "msi",
+    "onlineWindowsFormat": "exe",
     "offlineExeIcon": null,
     "onlineExeIcon": "https://xzexpress.092714.xyz/assets/xiaozhen-avatar.jpg"
   },
   "createdAt": "2026-07-24T09:02:58.037Z",
-  "updatedAt": "2026-07-24T09:02:58.037Z"
+  "updatedAt": "2026-07-26T04:37:13.454Z"
 }
