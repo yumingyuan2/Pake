@@ -7,7 +7,11 @@
     "windows": {
       "digestAlgorithm": "sha256",
       "wix": {
-        "language": ["en-US"],
+        "language": {
+          "en-US": {
+            "localePath": "assets/en-US.wxl"
+          }
+        },
         "template": "assets/main.wxs"
       }
     }

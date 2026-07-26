@@ -416,6 +416,29 @@ describe("Build App With Pake CLI online workflow", () => {
     expect(workflow).not.toContain("pake-online-repository-worktree");
   });
 
+  it("uses a UTF-8 MSI database for non-Latin application names", () => {
+    const wixTemplate = fs.readFileSync(
+      path.join(process.cwd(), "src-tauri/assets/main.wxs"),
+      "utf8",
+    );
+    const wixLocale = fs.readFileSync(
+      path.join(process.cwd(), "src-tauri/assets/en-US.wxl"),
+      "utf8",
+    );
+    const windowsConfig = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), "src-tauri/tauri.windows.conf.json"),
+        "utf8",
+      ),
+    );
+    expect(wixTemplate).toMatch(/<Product[\s\S]*Codepage="65001"/);
+    expect(wixLocale).toMatch(/WixLocalization[\s\S]*Codepage="65001"/);
+    expect(wixLocale).toContain('<String Id="TauriCodepage">1252</String>');
+    expect(windowsConfig.bundle.windows.wix.language).toEqual({
+      "en-US": { localePath: "assets/en-US.wxl" },
+    });
+  });
+
   it("publishes payload and bootstrap before the completed manifest", () => {
     const workflow = fs.readFileSync(workflowPath, "utf8");
     const actualUpload = workflow.indexOf(

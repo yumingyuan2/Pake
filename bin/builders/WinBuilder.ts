@@ -23,7 +23,10 @@ export default class WinBuilder extends BaseBuilder {
 
   getFileName(): string {
     const { name } = this.options;
-    const language = tauriConfig.bundle.windows.wix.language[0];
+    const wixLanguage = tauriConfig.bundle.windows.wix.language;
+    const language = Array.isArray(wixLanguage)
+      ? wixLanguage[0]
+      : Object.keys(wixLanguage)[0];
     const targetArch = this.getArchDisplayName(this.buildArch);
     return `${name}_${tauriConfig.version}_${targetArch}_${language}`;
   }

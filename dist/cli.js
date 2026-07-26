@@ -1009,7 +1009,13 @@ async function mergeConfig(url, options, tauriConf) {
         if (!windowsBundle) {
             throw new Error('Windows bundle configuration is missing from tauri.windows.conf.json; cannot build Windows target.');
         }
-        windowsBundle.wix.language[0] = installerLanguage;
+        const wixLanguage = windowsBundle.wix.language;
+        if (Array.isArray(wixLanguage)) {
+            wixLanguage[0] = installerLanguage;
+        }
+        else if (!(installerLanguage in wixLanguage)) {
+            windowsBundle.wix.language = [installerLanguage];
+        }
     }
     await handleLocalFile(url, useLocalFile, tauriConf);
     const platformMap = {
@@ -1735,7 +1741,10 @@ class WinBuilder extends BaseBuilder {
     }
     getFileName() {
         const { name } = this.options;
-        const language = tauriConfig.bundle.windows.wix.language[0];
+        const wixLanguage = tauriConfig.bundle.windows.wix.language;
+        const language = Array.isArray(wixLanguage)
+            ? wixLanguage[0]
+            : Object.keys(wixLanguage)[0];
         const targetArch = this.getArchDisplayName(this.buildArch);
         return `${name}_${tauriConfig.version}_${targetArch}_${language}`;
     }

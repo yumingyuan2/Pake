@@ -598,7 +598,12 @@ export async function mergeConfig(
         'Windows bundle configuration is missing from tauri.windows.conf.json; cannot build Windows target.',
       );
     }
-    windowsBundle.wix.language[0] = installerLanguage;
+    const wixLanguage = windowsBundle.wix.language;
+    if (Array.isArray(wixLanguage)) {
+      wixLanguage[0] = installerLanguage;
+    } else if (!(installerLanguage in wixLanguage)) {
+      windowsBundle.wix.language = [installerLanguage];
+    }
   }
 
   await handleLocalFile(url, useLocalFile, tauriConf);

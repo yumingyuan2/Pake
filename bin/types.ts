@@ -222,7 +222,9 @@ export interface PakeTauriConfig {
       [key: string]: unknown;
     };
     windows?: {
-      wix: { language: string[] };
+      wix: {
+        language: string[] | Record<string, { localePath?: string }>;
+      };
       [key: string]: unknown;
     };
     [key: string]: unknown;
