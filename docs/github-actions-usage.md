@@ -57,42 +57,43 @@ the latest stable Pake Release version. In a fork, the workflow reads the
 latest Release from its upstream parent repository. The manual `app_version`
 value continues to apply to non-online builds.
 
-The prerelease contains the versioned Qt Installer Framework component archive
-plus an online installer. Pake uses the open-source Qt Installer Framework
-(QtIFW) rather than a custom webview application. QtIFW runs as the extensible
-download and verification backend; it does not show a second installer wizard.
-The visible carrier reuses the offline package's application name, icon, and
-platform-native presentation.
+The prerelease contains a compressed real application payload plus a lightweight
+online bootstrap. The bootstrap is a windowless Pake build, not a second Tauri
+project or an external installer framework. It is packaged by the same native
+Tauri bundler as an offline build, so its application name, icon, shortcuts, and
+installer layout remain consistent with the offline package.
 
 - Windows: `online_windows_format` selects an app-specific `.msi` or `.exe`.
-  The MSI uses the same WiX page sequence and branding as the offline MSI while
-  running QtIFW unattended during installation. The EXE is a completely
-  windowless wrapper around that same MSI; `online_exe_icon` controls both the
-  wrapper and installer icon. The carrier uses version `255.0.0`, while the
-  downloaded application keeps the latest stable Pake Release version.
-- macOS: `.dmg` uses the offline DMG background, window size, icon positions,
-  and Applications drop link. Its app has the normal application name and icon;
-  opening it downloads the latest bundle in the background and launches it.
-- Linux: `.AppImage` uses the normal application name and icon. Opening it runs
-  QtIFW unattended, then launches the downloaded application AppImage.
+  The MSI is the normal Pake WiX package. The EXE is a completely windowless
+  wrapper around that same MSI, and `online_exe_icon` controls the wrapper icon.
+  The bootstrap uses version `255.0.0`; the real application payload uses the
+  latest stable Pake Release version.
+- macOS: the `.dmg` is produced by the normal Pake DMG bundler and contains an
+  app with the configured name and icon.
+- Linux: the `.AppImage` is produced by the normal Pake AppImage bundler and
+  uses the configured application name and icon.
+
+On the first application launch, the bootstrap silently downloads, verifies,
+and starts the newest real application. On later launches it starts the cached
+application immediately, checks for updates in the background, and activates a
+downloaded update on the next launch. There is no console window, progress
+window, or second installer UI.
 
 For online-mode runs, the Actions **Artifacts** section contains only the
 online installer. Open the rolling prerelease when you also need the real
 payload or native package. Non-online runs continue to upload only their
 regular offline packages as three-day Actions artifacts.
 
-All three platforms use the same maximum-compression QtIFW 7z repository
-format. Each configuration has an isolated
-`pake-online-repository-<config-id>` branch, updated only after its application
-and online carrier build successfully. QtIFW verifies repository metadata and
-archive hashes in the background. The rolling Release continues to retain the
-current and previous successful component archives and manifests.
+Windows payloads are ZIP-compressed executables, macOS payloads are zipped app
+bundles, and Linux payloads remain compressed AppImages. The bootstrap accepts
+only HTTPS assets from its embedded repository and rolling Release tag, then
+verifies the manifest, byte size, and SHA-256 before activation. The rolling
+Release retains the current and previous successful payloads and manifests.
 
-Before QtIFW fetches repository metadata, the checked-in controller script
-queries Cloudflare's country trace. In mainland China it changes
-`https://github.com/owner/repo/raw/...` to
-`https://v4.gh-proxy.org/https://github.com/owner/repo/raw/...`; elsewhere it
-uses GitHub directly.
+Before a GitHub asset download, the bootstrap queries Cloudflare's country
+trace. In mainland China it tries
+`https://v4.gh-proxy.org/https://github.com/owner/repo/releases/download/...`
+and falls back to GitHub directly; elsewhere it uses GitHub directly.
 
 ### Requirements and Limits
 
@@ -105,12 +106,10 @@ uses GitHub directly.
   the same combination with `enable-or-update` replaces its saved values.
 - Select `pause` with the same app, platform, and branch to stop future push
   builds. The last prerelease remains available.
-- Saved configurations live on `pake-online-config`; generated QtIFW
-  repositories use isolated `pake-online-repository-<config-id>` branches.
-  Each configuration consumes a runner on every matching push.
-- The Windows application is installed per-user. macOS may request
-  administrator authorization for `/Applications`; Linux uses a user-level
-  target by default.
+- Saved configurations live on `pake-online-config`. Each configuration
+  consumes a runner on every matching push.
+- Native packages install the bootstrap normally. Downloaded real applications
+  are kept in the current user's Pake data directory on every platform.
 
 ## Tips
 

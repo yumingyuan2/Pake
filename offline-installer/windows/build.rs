@@ -1,11 +1,30 @@
 use std::env;
 use std::path::PathBuf;
 
+fn numeric_version(value: &str) -> Option<u64> {
+    let core = value.split(['-', '+']).next()?;
+    let mut parts = [0_u16; 4];
+    let values = core.split('.').collect::<Vec<_>>();
+    if values.is_empty() || values.len() > parts.len() {
+        return None;
+    }
+    for (index, value) in values.into_iter().enumerate() {
+        parts[index] = value.parse().ok()?;
+    }
+    Some(
+        (u64::from(parts[0]) << 48)
+            | (u64::from(parts[1]) << 32)
+            | (u64::from(parts[2]) << 16)
+            | u64::from(parts[3]),
+    )
+}
+
 fn main() {
     println!("cargo:rerun-if-env-changed=PAKE_OFFLINE_MSI");
     println!("cargo:rerun-if-env-changed=PAKE_OFFLINE_ICON");
     println!("cargo:rerun-if-env-changed=PAKE_OFFLINE_APP_NAME");
     println!("cargo:rerun-if-env-changed=PAKE_INSTALLER_KIND");
+    println!("cargo:rerun-if-env-changed=PAKE_INSTALLER_VERSION");
     if let Some(msi) = env::var_os("PAKE_OFFLINE_MSI") {
         println!("cargo:rerun-if-changed={}", PathBuf::from(msi).display());
     }
@@ -36,6 +55,14 @@ fn main() {
             "FileDescription",
             &format!("{app_name} {installer_kind} Installer"),
         );
+        if let Some(version) = env::var("PAKE_INSTALLER_VERSION")
+            .ok()
+            .as_deref()
+            .and_then(numeric_version)
+        {
+            resource.set_version_info(winres::VersionInfo::FILEVERSION, version);
+            resource.set_version_info(winres::VersionInfo::PRODUCTVERSION, version);
+        }
         resource
             .compile()
             .expect("failed to compile the offline installer resources");

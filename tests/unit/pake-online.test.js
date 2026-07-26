@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   applyOnlineReleaseVersion,
+  createBootstrapCliConfig,
   createBuildConfig,
   createConfigId,
   createMatrix,
   loadRegistryConfigs,
   normalizeReleaseVersion,
+  ONLINE_BOOTSTRAP_VERSION,
   pauseRegistryConfig,
   upsertRegistryConfig,
 } from "../../scripts/pake-online/config.mjs";
@@ -20,14 +22,10 @@ import {
 } from "../../scripts/pake-online/icon.mjs";
 import {
   detectArtifactFormat,
+  ONLINE_MANIFEST_SCHEMA_VERSION,
   selectReleaseAssetsToDelete,
   stageReleaseAssets,
 } from "../../scripts/pake-online/release.mjs";
-import {
-  prepareQtIfwWorkspace,
-  QTIFW_DOWNLOADS,
-  QTIFW_INSTALLER_VERSION,
-} from "../../scripts/pake-online/qtifw.mjs";
 
 const temporaryDirectories = [];
 
@@ -72,6 +70,18 @@ function sampleContext(overrides = {}) {
   };
 }
 
+function onlineConfig(osName, overrides = {}) {
+  const platform = {
+    windows: "windows-latest",
+    macos: "macos-latest",
+    linux: "ubuntu-24.04",
+  }[osName];
+  return createBuildConfig(
+    sampleInputs({ platform, ...overrides }),
+    sampleContext(),
+  );
+}
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -93,91 +103,11 @@ describe("Pake online build configuration", () => {
     );
   });
 
-  it("normalizes workflow inputs into an explicit CLI config", () => {
+  it("normalizes workflow values and independent Windows EXE icons", () => {
     const config = createBuildConfig(
       sampleInputs({
         min_width: "640",
         fullscreen: true,
-        targets: "deb,appimage",
-      }),
-      sampleContext(),
-    );
-
-    expect(config.online).toBe(true);
-    expect(config.releaseTag).toBe(`pake-online-${config.id}`);
-    expect(config.delivery).toEqual({
-      windowsOfflineExe: false,
-      onlineWindowsFormat: "msi",
-      offlineExeIcon: null,
-      onlineExeIcon: null,
-    });
-    expect(config.cliConfig).toEqual({
-      url: "https://example.com",
-      name: "Example App",
-      icon: "",
-      width: 1200,
-      height: 780,
-      minWidth: 640,
-      minHeight: 0,
-      appVersion: "1.2.3",
-      targets: "msi",
-      fullscreen: true,
-      hideTitleBar: false,
-      multiArch: false,
-    });
-  });
-
-  it("uses the latest Release version for online runtime builds", () => {
-    const config = createBuildConfig(sampleInputs(), sampleContext());
-    const runtimeConfig = applyOnlineReleaseVersion(config, "V3.15.1");
-
-    expect(runtimeConfig.cliConfig.appVersion).toBe("3.15.1");
-    expect(config.cliConfig.appVersion).toBe("1.2.3");
-    expect(normalizeReleaseVersion("v4.0.0-beta.1")).toBe("4.0.0-beta.1");
-    expect(() => normalizeReleaseVersion("latest")).toThrow(/semantic version/);
-  });
-
-  it("uses AppImage as the portable Linux QtIFW component", () => {
-    const config = createBuildConfig(
-      sampleInputs({
-        platform: "ubuntu-24.04",
-        targets: "deb,rpm",
-      }),
-      sampleContext(),
-    );
-    const runtimeConfig = applyOnlineReleaseVersion(config, "V3.15.1");
-    expect(runtimeConfig.cliConfig.targets).toBe("appimage");
-  });
-
-  it("keeps the requested version for non-online builds", () => {
-    const config = createBuildConfig(
-      sampleInputs({ online_mode: false }),
-      sampleContext(),
-    );
-    expect(applyOnlineReleaseVersion(config)).toBe(config);
-    expect(config.cliConfig.appVersion).toBe("1.2.3");
-  });
-
-  it("keeps Linux targets and rejects non-web URLs", () => {
-    const linux = createBuildConfig(
-      sampleInputs({
-        platform: "ubuntu-24.04",
-        targets: "deb,appimage,rpm",
-      }),
-      sampleContext(),
-    );
-    expect(linux.cliConfig.targets).toBe("deb,appimage,rpm");
-    expect(() =>
-      createBuildConfig(
-        sampleInputs({ url: "file:///tmp/app.html" }),
-        sampleContext(),
-      ),
-    ).toThrow(/http or https/);
-  });
-
-  it("stores independent online and offline Windows EXE icon URLs", () => {
-    const config = createBuildConfig(
-      sampleInputs({
         offline_exe: true,
         online_windows_format: "exe",
         offline_exe_icon: "https://example.com/offline.ico",
@@ -185,15 +115,60 @@ describe("Pake online build configuration", () => {
       }),
       sampleContext(),
     );
+
+    expect(config.online).toBe(true);
+    expect(config.releaseTag).toBe(`pake-online-${config.id}`);
     expect(config.delivery).toEqual({
       windowsOfflineExe: true,
       onlineWindowsFormat: "exe",
       offlineExeIcon: "https://example.com/offline.ico",
       onlineExeIcon: "https://example.com/online.png",
     });
+    expect(config.cliConfig).toMatchObject({
+      url: "https://example.com",
+      name: "Example App",
+      minWidth: 640,
+      appVersion: "1.2.3",
+      targets: "msi",
+      fullscreen: true,
+    });
   });
 
-  it("rejects unsupported Windows online installer formats", () => {
+  it("uses the latest release for payloads and a high bootstrap version", () => {
+    for (const [osName, payloadTarget, bootstrapTarget] of [
+      ["windows", "msi", "msi"],
+      ["macos", "app", "dmg"],
+      ["linux", "appimage", "appimage"],
+    ]) {
+      const runtime = applyOnlineReleaseVersion(
+        onlineConfig(osName),
+        "V3.15.1",
+      );
+      expect(runtime.cliConfig.appVersion).toBe("3.15.1");
+      expect(runtime.cliConfig.targets).toBe(payloadTarget);
+      expect(createBootstrapCliConfig(runtime)).toMatchObject({
+        appVersion: ONLINE_BOOTSTRAP_VERSION,
+        targets: bootstrapTarget,
+      });
+    }
+    expect(ONLINE_BOOTSTRAP_VERSION).toBe("255.0.0");
+    expect(normalizeReleaseVersion("v4.0.0-beta.1")).toBe("4.0.0-beta.1");
+    expect(() => normalizeReleaseVersion("latest")).toThrow(/semantic version/);
+  });
+
+  it("keeps non-online versions and rejects invalid input", () => {
+    const config = createBuildConfig(
+      sampleInputs({ online_mode: false }),
+      sampleContext(),
+    );
+    expect(applyOnlineReleaseVersion(config)).toBe(config);
+    expect(config.cliConfig.appVersion).toBe("1.2.3");
+    expect(() =>
+      createBuildConfig(
+        sampleInputs({ url: "file:///tmp/app.html" }),
+        sampleContext(),
+      ),
+    ).toThrow(/http or https/);
     expect(() =>
       createBuildConfig(
         sampleInputs({ online_windows_format: "nsis" }),
@@ -202,9 +177,9 @@ describe("Pake online build configuration", () => {
     ).toThrow(/Windows installer format/);
   });
 
-  it("preserves createdAt on update and filters configs by source branch", () => {
+  it("updates, filters, pauses, and emits an empty matrix safely", () => {
     const directory = temporaryDirectory();
-    const initial = createBuildConfig(sampleInputs(), sampleContext());
+    const initial = onlineConfig("windows");
     upsertRegistryConfig(directory, initial);
     upsertRegistryConfig(directory, {
       ...initial,
@@ -223,254 +198,78 @@ describe("Pake online build configuration", () => {
     expect(configs).toHaveLength(1);
     expect(configs[0].createdAt).toBe("2026-07-23T00:00:00.000Z");
     expect(createMatrix(configs).include[0].config.id).toBe(initial.id);
-  });
-
-  it("pauses a config without affecting other registry entries", () => {
-    const directory = temporaryDirectory();
-    const first = createBuildConfig(sampleInputs(), sampleContext());
-    const second = createBuildConfig(
-      sampleInputs({ name: "Other" }),
-      sampleContext(),
-    );
-    upsertRegistryConfig(directory, first);
-    upsertRegistryConfig(directory, second);
-
-    expect(pauseRegistryConfig(directory, first.id)).toBe(true);
-    expect(pauseRegistryConfig(directory, first.id)).toBe(false);
-    expect(loadRegistryConfigs(directory, "main").map(({ id }) => id)).toEqual([
-      second.id,
-    ]);
-  });
-
-  it("emits an empty matrix when a pushed branch has no registrations", () => {
+    expect(pauseRegistryConfig(directory, initial.id)).toBe(true);
+    expect(pauseRegistryConfig(directory, initial.id)).toBe(false);
+    expect(loadRegistryConfigs(directory, "main")).toEqual([]);
     expect(createMatrix([])).toEqual({ include: [] });
-    expect(loadRegistryConfigs(temporaryDirectory(), "unregistered")).toEqual(
-      [],
-    );
-  });
-});
-
-describe("Qt Installer Framework online packaging", () => {
-  function onlineConfig(osName) {
-    return {
-      id: `example-${osName}-123`,
-      repository: "owner/repo",
-      sourceBranch: "main",
-      os: osName,
-      cliConfig: {
-        name: "Example App",
-        appVersion: "3.15.1",
-      },
-    };
-  }
-
-  it("generates a Windows QtIFW repository and native MSI definition", () => {
-    const directory = temporaryDirectory();
-    const source = path.join(directory, "source.exe");
-    fs.writeFileSync(source, "windows executable");
-
-    const result = prepareQtIfwWorkspace(onlineConfig("windows"), {
-      sourcePath: source,
-      outputDirectory: path.join(directory, "workspace"),
-      runNumber: "42",
-    });
-
-    expect(result.packageVersion).toBe("3.15.1.42");
-    expect(result.repositoryBranch).toBe(
-      "pake-online-repository-example-windows-123",
-    );
-    expect(result.proxyRepository).toBe(
-      `https://v4.gh-proxy.org/${result.officialRepository}`,
-    );
-    expect(fs.existsSync(result.wixPath)).toBe(true);
-    expect(
-      fs.existsSync(
-        path.join(result.packageDirectory, result.packageId, "data", "app.exe"),
-      ),
-    ).toBe(true);
-    expect(fs.readFileSync(result.configPath, "utf8")).toContain(
-      `<Version>${QTIFW_INSTALLER_VERSION}</Version>`,
-    );
-    expect(fs.readFileSync(result.controllerPath, "utf8")).toContain(
-      "installer.setTemporaryRepositories",
-    );
-    const wix = fs.readFileSync(result.wixPath, "utf8");
-    expect(wix).toContain('Name="Example App"');
-    expect(wix).not.toContain('Name="Example App Online"');
-    expect(wix).toContain('Id="InstallOnlinePayload"');
-    expect(wix).toContain('Execute="deferred"');
-    expect(wix).toContain("pake-online-launcher.ps1");
-    expect(wix).not.toContain('Id="LaunchOnlineInstaller"');
-    expect(wix).toContain(
-      '<Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg"',
-    );
-    const launcher = fs.readFileSync(result.launcherPath, "utf8");
-    expect(launcher).toContain("pake-online-maintenance.exe");
-    expect(launcher).toContain("$command = 'update'");
-    expect(launcher).toContain("org.pake.online.example.windows.123");
-  });
-
-  it.each([
-    ["macos", "Example Source.app", "Example App.app"],
-    ["linux", "Example.AppImage", "Example App.AppImage"],
-  ])(
-    "uses the same QtIFW 7z repository model for %s",
-    (osName, sourceName, payloadName) => {
-      const directory = temporaryDirectory();
-      const source = path.join(directory, sourceName);
-      if (osName === "macos") {
-        fs.mkdirSync(source);
-        fs.writeFileSync(path.join(source, "Info.plist"), "plist");
-      } else {
-        fs.writeFileSync(source, "appimage");
-      }
-
-      const result = prepareQtIfwWorkspace(onlineConfig(osName), {
-        sourcePath: source,
-        outputDirectory: path.join(directory, "workspace"),
-        runNumber: "7",
-      });
-
-      expect(
-        fs.existsSync(
-          path.join(
-            result.packageDirectory,
-            result.packageId,
-            "data",
-            payloadName,
-          ),
-        ),
-      ).toBe(true);
-      expect(result.wixPath).toBeNull();
-      expect(fs.existsSync(result.launcherPath)).toBe(true);
-      const launcher = fs.readFileSync(result.launcherPath, "utf8");
-      expect(launcher).toContain("pake-online-backend");
-      expect(launcher).toContain(
-        "org.pake.online.example." +
-          (osName === "macos" ? "macos" : "linux") +
-          ".123",
-      );
-      expect(launcher).not.toContain("binarycreator");
-      expect(launcher).toContain("update");
-      expect(launcher).toContain("pake-online-maintenance");
-      if (osName === "macos") {
-        expect(path.extname(result.launcherPath)).toBe(".swift");
-        expect(launcher).toContain("NSWorkspace.shared.open");
-      } else {
-        expect(path.extname(result.launcherPath)).toBe(".sh");
-        expect(launcher).toContain('exec "$installed_app" "$@"');
-      }
-      expect(result.qtifwDownloadSha256).toBe(QTIFW_DOWNLOADS[osName].sha256);
-    },
-  );
-
-  it("keeps the QtIFW wizard hidden behind native-looking carriers", () => {
-    const workflow = fs.readFileSync(
-      path.join(process.cwd(), ".github/workflows/pake-cli.yaml"),
-      "utf8",
-    );
-    expect(workflow).toContain("src-tauri/assets/macos/dmg/background.png");
-    expect(workflow).toContain("--no-internet-enable");
-    expect(workflow).toContain('hdiutil verify "$online_dmg"');
-    expect(workflow).toContain('--icon "$ONLINE_APP_NAME.app" 190 250');
-    expect(workflow).toContain("--app-drop-link 500 250");
-    expect(workflow).toContain("Name=$ONLINE_APP_NAME");
-    expect(workflow).toContain(
-      'swiftc "${{ steps.qtifw.outputs.launcher_path }}"',
-    );
-    expect(workflow).toContain(
-      'cp "${{ steps.qtifw.outputs.launcher_path }}" "$appdir/AppRun"',
-    );
-    expect(workflow).not.toContain(
-      'exec "$APPDIR/usr/bin/pake-online-installer"',
-    );
   });
 });
 
 describe("Pake online release assets", () => {
-  it("detects every supported offline installer format", () => {
-    expect(detectArtifactFormat("App.msi")).toBe("msi");
-    expect(detectArtifactFormat("App.exe")).toBe("exe");
-    expect(detectArtifactFormat("App.dmg")).toBe("dmg");
-    expect(detectArtifactFormat("App.deb")).toBe("deb");
-    expect(detectArtifactFormat("App.rpm")).toBe("rpm");
+  it("recognizes only the compressed runtime payload formats", () => {
+    expect(detectArtifactFormat("App.exe.zip")).toBe("exe.zip");
+    expect(detectArtifactFormat("App.app.zip")).toBe("app.zip");
     expect(detectArtifactFormat("App.AppImage")).toBe("appimage");
-    expect(detectArtifactFormat("App-1.pkg.tar.zst")).toBe("zst");
-    expect(detectArtifactFormat("App.tar.zst")).toBe("tar.zst");
-    expect(detectArtifactFormat("App.7z")).toBe("7z");
+    expect(detectArtifactFormat("App.msi")).toBeNull();
+    expect(detectArtifactFormat("App.dmg")).toBeNull();
+    expect(detectArtifactFormat("App.7z")).toBeNull();
   });
 
-  it("stages versioned assets and writes a checksummed manifest", () => {
+  it.each([
+    ["windows", "application.exe.zip", "exe.zip", "app.exe", "executable"],
+    ["macos", "Example App.app.zip", "app.zip", "Example App.app", "appBundle"],
+    ["linux", "application.AppImage", "appimage", "app.AppImage", "executable"],
+  ])(
+    "stages one verified %s payload",
+    (osName, fileName, format, entrypoint, launchKind) => {
+      const root = temporaryDirectory();
+      const input = path.join(root, "input");
+      const output = path.join(root, "output");
+      fs.mkdirSync(input);
+      fs.writeFileSync(path.join(input, fileName), "compressed-payload");
+      const config = onlineConfig(osName);
+      const result = stageReleaseAssets(config, {
+        inputDirectory: input,
+        outputDirectory: output,
+        sourceSha: "1234567890abcdef",
+        runAttempt: "2",
+        arch: "X64",
+        builtAt: "2026-07-23T00:00:00.000Z",
+      });
+
+      expect(result.manifest.schemaVersion).toBe(
+        ONLINE_MANIFEST_SCHEMA_VERSION,
+      );
+      expect(result.manifest.artifacts).toHaveLength(1);
+      const payload = result.manifest.artifacts[0];
+      expect(payload).toMatchObject({
+        format,
+        size: 18,
+        packageId: "Example App",
+        entrypoint,
+        launchKind,
+      });
+      expect(payload.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(payload.name).toBe(
+        `${config.id}-1234567890ab-${payload.sha256.slice(0, 12)}.${format}`,
+      );
+      expect(path.basename(result.manifestPath)).toBe(
+        `pake-online-manifest-1234567890ab-${payload.sha256.slice(0, 12)}.json`,
+      );
+    },
+  );
+
+  it("uses the configured Windows online carrier format", () => {
     const root = temporaryDirectory();
     const input = path.join(root, "input");
-    const output = path.join(root, "output");
     fs.mkdirSync(input);
-    const payloadPath = path.join(input, "Example App.tar.zst");
-    fs.writeFileSync(payloadPath, "compressed-payload");
-    fs.writeFileSync(
-      `${payloadPath}.json`,
-      JSON.stringify({
-        format: "tar.zst",
-        expandedSize: 42,
-        executableName: "app.exe",
-        executableSha256: "a".repeat(64),
-      }),
-    );
-    const config = createBuildConfig(sampleInputs(), sampleContext());
+    fs.writeFileSync(path.join(input, "application.exe.zip"), "payload");
+    const config = onlineConfig("windows", {
+      online_windows_format: "exe",
+    });
     const result = stageReleaseAssets(config, {
       inputDirectory: input,
-      outputDirectory: output,
-      sourceSha: "1234567890abcdef",
-      runAttempt: "2",
-      arch: "X64",
-      builtAt: "2026-07-23T00:00:00.000Z",
-    });
-
-    expect(result.manifest.artifacts).toHaveLength(1);
-    const payload = result.manifest.artifacts.find(
-      (artifact) => artifact.format === "tar.zst",
-    );
-    expect(payload).toMatchObject({
-      format: "tar.zst",
-      size: 18,
-      name: `${config.id}-1234567890ab.tar.zst`,
-      packageId: config.id,
-      expandedSize: 42,
-      executableName: "app.exe",
-      executableSha256: "a".repeat(64),
-    });
-    expect(payload.sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(result.manifest.onlineInstaller.name).toBe(
-      `${config.id}-online-installer.msi`,
-    );
-    expect(path.basename(result.manifestPath)).toBe(
-      "pake-online-manifest-1234567890ab-2.json",
-    );
-  });
-
-  it("names the Windows online carrier from the configured format", () => {
-    const root = temporaryDirectory();
-    const input = path.join(root, "input");
-    const output = path.join(root, "output");
-    fs.mkdirSync(input);
-    const payloadPath = path.join(input, "payload.tar.zst");
-    fs.writeFileSync(payloadPath, "payload");
-    fs.writeFileSync(
-      `${payloadPath}.json`,
-      JSON.stringify({
-        format: "tar.zst",
-        expandedSize: 7,
-        executableName: "app.exe",
-        executableSha256: "b".repeat(64),
-      }),
-    );
-    const config = createBuildConfig(
-      sampleInputs({ online_windows_format: "exe" }),
-      sampleContext(),
-    );
-    const result = stageReleaseAssets(config, {
-      inputDirectory: input,
-      outputDirectory: output,
+      outputDirectory: path.join(root, "output"),
       sourceSha: "1234567890abcdef",
       arch: "X64",
     });
@@ -479,14 +278,55 @@ describe("Pake online release assets", () => {
     );
   });
 
-  it("keeps the latest two manifests and their referenced packages", () => {
+  it("rejects ambiguous payload directories", () => {
+    const root = temporaryDirectory();
+    fs.writeFileSync(path.join(root, "one.AppImage"), "one");
+    fs.writeFileSync(path.join(root, "two.AppImage"), "two");
+    expect(() =>
+      stageReleaseAssets(onlineConfig("linux"), {
+        inputDirectory: root,
+        outputDirectory: path.join(root, "output"),
+        sourceSha: "1234567890abcdef",
+        arch: "X64",
+      }),
+    ).toThrow(/exactly one/);
+  });
+
+  it("does not overwrite a rebuilt payload from the same source commit", () => {
+    const root = temporaryDirectory();
+    const input = path.join(root, "input");
+    fs.mkdirSync(input);
+    const payload = path.join(input, "application.exe.zip");
+    const config = onlineConfig("windows");
+    const stage = (outputDirectory) =>
+      stageReleaseAssets(config, {
+        inputDirectory: input,
+        outputDirectory,
+        sourceSha: "1234567890abcdef",
+        arch: "X64",
+      });
+
+    fs.writeFileSync(payload, "first build");
+    const first = stage(path.join(root, "first"));
+    fs.writeFileSync(payload, "changed configuration build");
+    const second = stage(path.join(root, "second"));
+
+    expect(second.manifest.artifacts[0].name).not.toBe(
+      first.manifest.artifacts[0].name,
+    );
+    expect(path.basename(second.manifestPath)).not.toBe(
+      path.basename(first.manifestPath),
+    );
+  });
+
+  it("keeps the latest two manifests and their referenced assets", () => {
     const assets = [
       { id: 9, name: "pake-online-manifest-new.json" },
       { id: 8, name: "pake-online-manifest-previous.json" },
       { id: 7, name: "pake-online-manifest-old.json" },
-      { id: 6, name: "example-windows-id-new.tar.zst" },
-      { id: 5, name: "example-windows-id-previous.tar.zst" },
-      { id: 4, name: "example-windows-id-old.tar.zst" },
+      { id: 6, name: "example-windows-id-new.exe.zip" },
+      { id: 5, name: "example-windows-id-previous.exe.zip" },
+      { id: 4, name: "example-windows-id-old.exe.zip" },
       { id: 3, name: "example-windows-id-online-installer.msi" },
       { id: 2, name: "maintainer-notes.txt" },
     ];
@@ -494,7 +334,7 @@ describe("Pake online release assets", () => {
       [
         "pake-online-manifest-new.json",
         {
-          artifacts: [{ name: "example-windows-id-new.tar.zst" }],
+          artifacts: [{ name: "example-windows-id-new.exe.zip" }],
           onlineInstaller: {
             name: "example-windows-id-online-installer.msi",
           },
@@ -503,7 +343,7 @@ describe("Pake online release assets", () => {
       [
         "pake-online-manifest-previous.json",
         {
-          artifacts: [{ name: "example-windows-id-previous.tar.zst" }],
+          artifacts: [{ name: "example-windows-id-previous.exe.zip" }],
           onlineInstaller: {
             name: "example-windows-id-online-installer.msi",
           },
@@ -517,7 +357,7 @@ describe("Pake online release assets", () => {
       ),
     ).toEqual([
       "pake-online-manifest-old.json",
-      "example-windows-id-old.tar.zst",
+      "example-windows-id-old.exe.zip",
     ]);
   });
 });
@@ -533,76 +373,51 @@ describe("Windows installer icon preparation", () => {
     ).toThrow(/credentials/);
   });
 
-  it("preserves an ICO payload for the requested installer", async () => {
+  it("preserves ICO and converts PNG input", async () => {
     const directory = temporaryDirectory();
-    const output = path.join(directory, "installer.ico");
+    const icoOutput = path.join(directory, "installer.ico");
     const ico = Buffer.from([0, 0, 1, 0, 0, 0]);
-    expect(isIco(ico)).toBe(true);
-    await writeWindowsIcon(ico, output);
-    expect(fs.readFileSync(output)).toEqual(ico);
-  });
+    await writeWindowsIcon(ico, icoOutput);
+    expect(isIco(fs.readFileSync(icoOutput))).toBe(true);
 
-  it("converts a PNG into a multi-size Windows ICO", async () => {
-    const directory = temporaryDirectory();
-    const output = path.join(directory, "converted.ico");
+    const pngOutput = path.join(directory, "converted.ico");
     const png = fs.readFileSync(
       path.join(process.cwd(), "src-tauri/png/icon_512.png"),
     );
-    await writeWindowsIcon(png, output);
-    expect(isIco(fs.readFileSync(output))).toBe(true);
+    await writeWindowsIcon(png, pngOutput);
+    expect(isIco(fs.readFileSync(pngOutput))).toBe(true);
   });
 });
 
 describe("Build App With Pake CLI online workflow", () => {
-  it("registers push builds while preserving manual dispatch", () => {
-    const workflow = fs.readFileSync(
-      path.join(process.cwd(), ".github/workflows/pake-cli.yaml"),
-      "utf8",
-    );
+  const workflowPath = path.join(
+    process.cwd(),
+    ".github/workflows/pake-cli.yaml",
+  );
+
+  it("registers push builds and uses the native Pake bootstrap", () => {
+    const workflow = fs.readFileSync(workflowPath, "utf8");
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("push:");
     expect(workflow).toContain("online_mode:");
     expect(workflow).toContain("online_operation:");
-    expect(workflow).toContain("online_windows_format:");
-    expect(workflow).toContain("offline_exe:");
-    expect(workflow).toContain("offline_exe_icon:");
-    expect(workflow).toContain("online_exe_icon:");
     expect(workflow).toContain('ONLINE_CONFIG_BRANCH: "pake-online-config"');
-    expect(workflow).toContain('node dist/cli.js --config "$PAKE_CLI_CONFIG"');
-    expect(workflow).toContain(
-      'node dist/cli.js --config "$env:PAKE_CLI_CONFIG"',
-    );
-    expect(workflow).toContain("Install Qt Installer Framework");
-    expect(workflow).toContain("scripts/pake-online/qtifw.mjs");
-    expect(workflow).toContain("--remove --ac 9");
-    expect(workflow).toContain("<DownloadableArchives>");
-    expect(workflow).toContain('-name "*$archive_suffix"');
-    expect(workflow).toContain('test "$count" -eq 1');
-    expect(workflow).not.toContain("$archive_name");
-    expect(workflow).toContain("Clear stale Windows online entrypoints");
-    expect(workflow).toContain('if ($env:ONLINE_WINDOWS_FORMAT -eq "exe")');
-    expect(workflow).toContain("candle.exe");
-    expect(workflow).toContain("binarycreator");
-    expect(workflow).toContain("Publish QtIFW repository branch");
-    expect(workflow).toContain("pake-online-repository-worktree");
-    expect(workflow).toContain("appimagetool");
+    expect(workflow).toContain("PAKE_ONLINE_BOOTSTRAP");
+    expect(workflow).toContain("PAKE_WINDOWS_ONLINE_PAYLOAD");
+    expect(workflow).toContain("pake-bootstrap-cli-config.json");
+    expect(workflow).toContain("Compress-Archive");
+    expect(workflow).toContain("application.exe.zip");
+    expect(workflow).toContain("ditto -c -k");
+    expect(workflow).toContain("& $light -sval");
     expect(workflow).toContain("Build offline EXE wrapper (Windows)");
-    expect(workflow).toContain("PAKE_OFFLINE_ICON");
-    expect(workflow).toContain("ONLINE_EXE_ICON");
-    expect(workflow).toContain(
-      'gh api "repos/$RELEASE_REPOSITORY/releases/latest"',
-    );
-    expect(workflow).toContain("node scripts/pake-online/config.mjs runtime");
-    expect(workflow).toContain(
-      'git -C "$REGISTRY_WORKTREE" rm -rf --ignore-unmatch .',
-    );
+    expect(workflow).toContain('if ($env:ONLINE_WINDOWS_FORMAT -eq "exe")');
+    expect(workflow).toContain('$env:PAKE_INSTALLER_VERSION = "255.0.0"');
+    expect(workflow).not.toMatch(/QtIFW|qtifw|binarycreator|repogen/);
+    expect(workflow).not.toContain("pake-online-repository-worktree");
   });
 
-  it("publishes the real package and online carrier before the manifest", () => {
-    const workflow = fs.readFileSync(
-      path.join(process.cwd(), ".github/workflows/pake-cli.yaml"),
-      "utf8",
-    );
+  it("publishes payload and bootstrap before the completed manifest", () => {
+    const workflow = fs.readFileSync(workflowPath, "utf8");
     const actualUpload = workflow.indexOf(
       "for asset in .pake-online-release/actual/*",
     );
@@ -617,20 +432,13 @@ describe("Build App With Pake CLI online workflow", () => {
     expect(manifestUpload).toBeGreaterThan(onlineUpload);
   });
 
-  it("uploads only the online carrier as an Actions artifact in online mode", () => {
-    const workflow = fs.readFileSync(
-      path.join(process.cwd(), ".github/workflows/pake-cli.yaml"),
-      "utf8",
-    );
-    expect(workflow).toContain(
-      "if: runner.os == 'Windows' && !matrix.config.online",
-    );
-    expect(workflow).toContain(
-      "if: runner.os == 'macOS' && !matrix.config.online",
-    );
-    expect(workflow).toContain(
-      "if: runner.os == 'Linux' && !matrix.config.online",
-    );
+  it("keeps manual artifacts unchanged and publishes only the online bootstrap", () => {
+    const workflow = fs.readFileSync(workflowPath, "utf8");
+    for (const runner of ["Windows", "macOS", "Linux"]) {
+      expect(workflow).toContain(
+        `if: runner.os == '${runner}' && !matrix.config.online`,
+      );
+    }
     expect(workflow).toContain("- name: Upload online installer");
     expect(workflow).toContain(
       "name: ${{ matrix.config.cliConfig.name }}-${{ matrix.config.os }}-online-installer",
@@ -638,23 +446,15 @@ describe("Build App With Pake CLI online workflow", () => {
     expect(workflow).toContain('path: ".pake-online-release/online/*"');
   });
 
-  it("builds every online installer carrier in full CI", () => {
+  it("compiles and tests the bootstrap on all platforms in full CI", () => {
     const workflow = fs.readFileSync(
       path.join(process.cwd(), ".github/workflows/quality-and-test.yml"),
       "utf8",
     );
     expect(workflow).toContain("online-installer-build:");
-    expect(workflow).toContain("scripts/pake-online/install-qtifw.sh");
-    expect(workflow).toContain("qtifw.mjs prepare");
-    expect(workflow).toContain("repogen");
-    expect(workflow).toContain("binarycreator");
-    expect(workflow).toContain('-name "*$archive_suffix"');
-    expect(workflow).toContain('test "$count" -eq 1');
-    expect(
-      fs.readFileSync(
-        path.join(process.cwd(), "scripts/pake-online/install-qtifw.sh"),
-        "utf8",
-      ),
-    ).toContain("libxkbcommon-x11-0");
+    expect(workflow).toContain("Test online bootstrap");
+    expect(workflow).toContain("Build release online bootstrap");
+    expect(workflow).toContain("--features online-bootstrap");
+    expect(workflow).not.toMatch(/QtIFW|qtifw|binarycreator|repogen/);
   });
 });

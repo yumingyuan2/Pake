@@ -273,9 +273,11 @@ jobs:
         run: |
           node scripts/pake-online/config.mjs runtime \
             "$RUNNER_TEMP/pake-build-config.json" \
-            "$RUNNER_TEMP/pake-cli-config.json"
+            "$RUNNER_TEMP/pake-cli-config.json" \
+            "$RUNNER_TEMP/pake-bootstrap-cli-config.json"
           echo "PAKE_BUILD_CONFIG=$RUNNER_TEMP/pake-build-config.json" >> "$GITHUB_ENV"
           echo "PAKE_CLI_CONFIG=$RUNNER_TEMP/pake-cli-config.json" >> "$GITHUB_ENV"
+          echo "PAKE_BOOTSTRAP_CLI_CONFIG=$RUNNER_TEMP/pake-bootstrap-cli-config.json" >> "$GITHUB_ENV"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -320,13 +322,26 @@ jobs:
       - name: Build App
         timeout-minutes: 25
         run: node dist/cli.js --config "$env:PAKE_CLI_CONFIG"
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !matrix.config.online
 
       - name: Build App
         timeout-minutes: 25
         shell: bash
         run: node dist/cli.js --config "$PAKE_CLI_CONFIG"
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && !matrix.config.online
+
+      - name: Build online application payload (Windows)
+        if: runner.os == 'Windows' && matrix.config.online
+        timeout-minutes: 25
+        env:
+          PAKE_WINDOWS_ONLINE_PAYLOAD: "1"
+        run: node dist/cli.js --config "$env:PAKE_CLI_CONFIG"
+
+      - name: Build online application payload (macOS/Linux)
+        if: runner.os != 'Windows' && matrix.config.online
+        timeout-minutes: 25
+        shell: bash
+        run: node dist/cli.js --config "$PAKE_CLI_CONFIG"
 
       - name: Restore generated Cargo lock changes
         if: runner.os == 'Windows'
@@ -436,150 +451,113 @@ jobs:
           path: "*.exe"
           retention-days: 3
 
-      - name: Locate Windows online payload
+      - name: Stage Windows online payload
         if: matrix.config.online && runner.os == 'Windows'
         run: |
-          $rawExecutables = @(
-            Get-ChildItem "src-tauri\target" -Recurse -File -Filter "pake-*.exe" |
-              Where-Object {
-                $_.Directory.Name -eq "release" -and
-                $_.FullName -notmatch '\\bundle\\'
-              }
-          )
-          if ($rawExecutables.Count -ne 1) {
-            throw "Expected exactly one raw Pake executable, found $($rawExecutables.Count)."
+          $payloads = @(Get-ChildItem -File -Filter "*.exe")
+          if ($payloads.Count -ne 1) {
+            throw "Expected exactly one Windows payload, found $($payloads.Count)."
           }
-          "PAKE_QTIFW_PAYLOAD=$($rawExecutables[0].FullName)" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Force ".pake-online-input" | Out-Null
+          $stagedExecutable = Join-Path $env:RUNNER_TEMP "app.exe"
+          Copy-Item $payloads[0].FullName $stagedExecutable
+          Compress-Archive -LiteralPath $stagedExecutable `
+            -DestinationPath ".pake-online-input\application.exe.zip" `
+            -CompressionLevel Optimal
 
-      - name: Locate macOS online payload
+      - name: Stage macOS online payload
         if: matrix.config.online && runner.os == 'macOS'
         shell: bash
         run: |
-          app="$(find src-tauri/target -path '*/release/bundle/macos/*.app' \
-            -type d -print -quit)"
+          app="$(find . -maxdepth 1 -name '*.app' -type d -print -quit)"
           test -n "$app"
-          count="$(find src-tauri/target -path '*/release/bundle/macos/*.app' \
-            -type d -print | wc -l | tr -d ' ')"
+          count="$(find . -maxdepth 1 -name '*.app' -type d -print \
+            | wc -l | tr -d ' ')"
           test "$count" -eq 1
-          echo "PAKE_QTIFW_PAYLOAD=$app" >> "$GITHUB_ENV"
+          mkdir -p .pake-online-input
+          archive=".pake-online-input/$(basename "$app").zip"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app" "$archive"
 
-      - name: Locate Linux online payload
+      - name: Stage Linux online payload
         if: matrix.config.online && runner.os == 'Linux'
         shell: bash
         run: |
-          appimage="$(find . -maxdepth 2 -name '*.AppImage' -type f -print -quit)"
+          appimage="$(find . -maxdepth 1 -name '*.AppImage' -type f -print -quit)"
           test -n "$appimage"
-          count="$(find . -maxdepth 2 -name '*.AppImage' -type f -print \
+          count="$(find . -maxdepth 1 -name '*.AppImage' -type f -print \
             | wc -l | tr -d ' ')"
           test "$count" -eq 1
-          echo "PAKE_QTIFW_PAYLOAD=$appimage" >> "$GITHUB_ENV"
-
-      - name: Install Qt Installer Framework
-        if: matrix.config.online
-        shell: bash
-        run: bash scripts/pake-online/install-qtifw.sh
-
-      - name: Install macOS DMG layout tool
-        if: matrix.config.online && runner.os == 'macOS'
-        shell: bash
-        run: brew install create-dmg
-
-      - name: Prepare QtIFW package definition
-        id: qtifw
-        if: matrix.config.online
-        shell: bash
-        run: |
-          args=(
-            prepare
-            "$PAKE_BUILD_CONFIG"
-            "$PAKE_QTIFW_PAYLOAD"
-            ".pake-qtifw"
-            "$GITHUB_RUN_NUMBER"
-          )
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            args+=("$ONLINE_EXE_ICON")
-          fi
-          node scripts/pake-online/qtifw.mjs "${args[@]}"
-
-      - name: Generate QtIFW online repository
-        if: matrix.config.online
-        shell: bash
-        run: |
-          "$QTIFW_BIN/repogen${{ runner.os == 'Windows' && '.exe' || '' }}" \
-            --remove --ac 9 \
-            -p "${{ steps.qtifw.outputs.package_directory }}" \
-            "${{ steps.qtifw.outputs.repository_directory }}"
           mkdir -p .pake-online-input
-          archive_suffix="$(
-            node -e '
-              const fs = require("fs");
-              const xml = fs.readFileSync(process.argv[1], "utf8");
-              const match = xml.match(
-                /<DownloadableArchives>([^<]+)<\/DownloadableArchives>/,
-              );
-              if (!match) throw new Error("QtIFW repository has no payload archive.");
-              const names = match[1].split(",").map((name) => name.trim());
-              if (names.length !== 1) {
-                throw new Error(`Expected one QtIFW payload archive, found ${names.length}.`);
-              }
-              process.stdout.write(names[0]);
-            ' "${{ steps.qtifw.outputs.repository_directory }}/Updates.xml"
-          )"
-          archive="$(find "${{ steps.qtifw.outputs.repository_directory }}" \
-            -name "*$archive_suffix" -type f -print -quit)"
-          test -n "$archive"
-          count="$(find "${{ steps.qtifw.outputs.repository_directory }}" \
-            -name "*$archive_suffix" -type f -print | wc -l | tr -d ' ')"
-          test "$count" -eq 1
-          cp "$archive" .pake-online-input/application.7z
-          echo "PAKE_RELEASE_INPUT=.pake-online-input" >> "$GITHUB_ENV"
+          cp "$appimage" .pake-online-input/application.AppImage
 
       - name: Stage rolling release assets
         id: release_assets
         if: matrix.config.online
         shell: bash
         run: |
-          INPUT_DIRECTORY="${PAKE_RELEASE_INPUT:-.}"
           node scripts/pake-online/release.mjs stage \
-            "$PAKE_BUILD_CONFIG" "$INPUT_DIRECTORY" ".pake-online-release"
+            "$PAKE_BUILD_CONFIG" ".pake-online-input" ".pake-online-release"
 
-      - name: Build online installer (Windows)
+      - name: Build Pake online bootstrap (Windows)
         if: matrix.config.online && runner.os == 'Windows'
         env:
           ONLINE_INSTALLER_NAME: ${{ steps.release_assets.outputs.online_installer_name }}
-          ONLINE_PRODUCT_NAME: ${{ steps.qtifw.outputs.app_name }}
+          ONLINE_PRODUCT_NAME: ${{ matrix.config.cliConfig.name }}
           ONLINE_WINDOWS_FORMAT: ${{ matrix.config.delivery.onlineWindowsFormat || 'msi' }}
+          PAKE_ONLINE_BOOTSTRAP: "1"
+          PAKE_ONLINE_REPOSITORY: ${{ matrix.config.repository }}
+          PAKE_ONLINE_RELEASE_TAG: ${{ matrix.config.releaseTag }}
+          PAKE_ONLINE_CONFIG_ID: ${{ matrix.config.id }}
+          PAKE_ONLINE_OS: ${{ matrix.config.os }}
         run: |
-          $qtifwExe = Join-Path $env:RUNNER_TEMP "pake-online-qtifw.exe"
-          & "$env:QTIFW_BIN\binarycreator.exe" --online-only `
-            -c "${{ steps.qtifw.outputs.config_path }}" `
-            -p "${{ steps.qtifw.outputs.package_directory }}" `
-            $qtifwExe
-          if ($LASTEXITCODE -ne 0) {
-            throw "QtIFW binarycreator failed with exit code $LASTEXITCODE."
+          $buildStarted = (Get-Date).AddSeconds(-2)
+          node dist/cli.js --config "$env:PAKE_BOOTSTRAP_CLI_CONFIG"
+          $buildExit = $LASTEXITCODE
+          $msiFiles = @(Get-ChildItem -File -Filter "*.msi")
+          if ($buildExit -ne 0) {
+            $wixObject = Get-ChildItem "src-tauri\target" -Recurse -File `
+              -Filter "main.wixobj" |
+              Where-Object {
+                $_.LastWriteTime -ge $buildStarted -and
+                (Test-Path (Join-Path $_.Directory.FullName "locale.wxl"))
+              } |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1
+            if (-not $wixObject) {
+              throw "The Pake bootstrap build failed before WiX linking."
+            }
+            $wixDirectory = $wixObject.Directory
+            $wixTools = Join-Path $env:LOCALAPPDATA "tauri\WixTools314"
+            $light = Join-Path $wixTools "light.exe"
+            $fallbackMsi = Join-Path $env:RUNNER_TEMP "pake-online-bootstrap.msi"
+            $wixObjects = @(
+              Get-ChildItem $wixDirectory.FullName -File -Filter "*.wixobj" |
+                ForEach-Object FullName
+            )
+            & $light -sval `
+              -ext (Join-Path $wixTools "WixUtilExtension.dll") `
+              -ext (Join-Path $wixTools "WixUIExtension.dll") `
+              -out $fallbackMsi `
+              -cultures:en-us `
+              -loc (Join-Path $wixDirectory.FullName "locale.wxl") `
+              $wixObjects
+            if ($LASTEXITCODE -ne 0) {
+              throw "WiX fallback linking failed with exit code $LASTEXITCODE."
+            }
+            $msiFiles = @(Get-Item $fallbackMsi)
           }
-          $candle = (Get-Command candle.exe -ErrorAction Stop).Source
-          $light = (Get-Command light.exe -ErrorAction Stop).Source
-          $wixObject = Join-Path $env:RUNNER_TEMP "pake-online.wixobj"
-          $onlineMsi = Join-Path $env:RUNNER_TEMP "pake-online.msi"
-          & $candle -arch x64 `
-            "-dQtIfwSource=$qtifwExe" `
-            "-dLauncherSource=${{ steps.qtifw.outputs.launcher_path }}" `
-            "-dIconSource=${{ steps.qtifw.outputs.icon_path }}" `
-            -out $wixObject "${{ steps.qtifw.outputs.wix_path }}"
-          if ($LASTEXITCODE -ne 0) {
-            throw "WiX candle failed with exit code $LASTEXITCODE."
+          if ($msiFiles.Count -ne 1) {
+            throw "Expected exactly one bootstrap MSI, found $($msiFiles.Count)."
           }
-          & $light -sval -ext WixUIExtension -out $onlineMsi $wixObject
-          if ($LASTEXITCODE -ne 0) {
-            throw "WiX light failed with exit code $LASTEXITCODE."
-          }
+          $onlineMsi = $msiFiles[0].FullName
           New-Item -ItemType Directory -Force ".pake-online-release\online"
           if ($env:ONLINE_WINDOWS_FORMAT -eq "exe") {
             $env:PAKE_OFFLINE_MSI = $onlineMsi
             $env:PAKE_OFFLINE_ICON = $env:ONLINE_EXE_ICON
             $env:PAKE_OFFLINE_APP_NAME = $env:ONLINE_PRODUCT_NAME
             $env:PAKE_INSTALLER_KIND = "Online"
+            $env:PAKE_INSTALLER_VERSION = "255.0.0"
             cargo build --locked --release `
               --manifest-path offline-installer/windows/Cargo.toml
             Copy-Item `
@@ -591,104 +569,45 @@ jobs:
             throw "Unsupported Windows online installer format: $env:ONLINE_WINDOWS_FORMAT"
           }
 
-      - name: Build online installer (macOS)
+      - name: Build Pake online bootstrap (macOS)
         if: matrix.config.online && runner.os == 'macOS'
         env:
           ONLINE_INSTALLER_NAME: ${{ steps.release_assets.outputs.online_installer_name }}
-          ONLINE_APP_NAME: ${{ steps.qtifw.outputs.app_name }}
+          PAKE_ONLINE_BOOTSTRAP: "1"
+          PAKE_ONLINE_REPOSITORY: ${{ matrix.config.repository }}
+          PAKE_ONLINE_RELEASE_TAG: ${{ matrix.config.releaseTag }}
+          PAKE_ONLINE_CONFIG_ID: ${{ matrix.config.id }}
+          PAKE_ONLINE_OS: ${{ matrix.config.os }}
         shell: bash
         run: |
-          qtifw_app="$RUNNER_TEMP/$ONLINE_APP_NAME.app"
-          "$QTIFW_BIN/binarycreator" --online-only \
-            -c "${{ steps.qtifw.outputs.config_path }}" \
-            -p "${{ steps.qtifw.outputs.package_directory }}" \
-            "$qtifw_app"
-          bundle_executable="$(
-            /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
-              "$qtifw_app/Contents/Info.plist"
-          )"
-          mv "$qtifw_app/Contents/MacOS/$bundle_executable" \
-            "$qtifw_app/Contents/MacOS/pake-online-backend"
-          swiftc "${{ steps.qtifw.outputs.launcher_path }}" \
-            -framework AppKit \
-            -o "$qtifw_app/Contents/MacOS/$bundle_executable"
-          chmod +x "$qtifw_app/Contents/MacOS/pake-online-backend"
-          codesign --force --deep --sign - "$qtifw_app"
-          dmg_source="$RUNNER_TEMP/pake-online-dmg"
-          mkdir -p "$dmg_source"
-          cp -R "$qtifw_app" "$dmg_source/"
+          node dist/cli.js --config "$PAKE_BOOTSTRAP_CLI_CONFIG"
+          dmg="$(find . -maxdepth 1 -name '*.dmg' -type f -print -quit)"
+          test -n "$dmg"
+          count="$(find . -maxdepth 1 -name '*.dmg' -type f -print \
+            | wc -l | tr -d ' ')"
+          test "$count" -eq 1
           mkdir -p .pake-online-release/online
-          online_dmg=".pake-online-release/online/$ONLINE_INSTALLER_NAME"
-          if ! create-dmg \
-            --no-internet-enable \
-            --volname "$ONLINE_APP_NAME" \
-            --volicon "${{ steps.qtifw.outputs.icon_path }}" \
-            --background "src-tauri/assets/macos/dmg/background.png" \
-            --window-size 680 420 \
-            --icon "$ONLINE_APP_NAME.app" 190 250 \
-            --hide-extension "$ONLINE_APP_NAME.app" \
-            --app-drop-link 500 250 \
-            "$online_dmg" \
-            "$dmg_source"; then
-            test -s "$online_dmg"
-            hdiutil verify "$online_dmg"
-          fi
+          cp "$dmg" ".pake-online-release/online/$ONLINE_INSTALLER_NAME"
 
-      - name: Build online installer (Linux)
+      - name: Build Pake online bootstrap (Linux)
         if: matrix.config.online && runner.os == 'Linux'
         env:
           ONLINE_INSTALLER_NAME: ${{ steps.release_assets.outputs.online_installer_name }}
-          ONLINE_APP_NAME: ${{ steps.qtifw.outputs.app_name }}
+          PAKE_ONLINE_BOOTSTRAP: "1"
+          PAKE_ONLINE_REPOSITORY: ${{ matrix.config.repository }}
+          PAKE_ONLINE_RELEASE_TAG: ${{ matrix.config.releaseTag }}
+          PAKE_ONLINE_CONFIG_ID: ${{ matrix.config.id }}
+          PAKE_ONLINE_OS: ${{ matrix.config.os }}
         shell: bash
         run: |
-          qtifw_binary="$RUNNER_TEMP/pake-online-installer"
-          "$QTIFW_BIN/binarycreator" --online-only \
-            -c "${{ steps.qtifw.outputs.config_path }}" \
-            -p "${{ steps.qtifw.outputs.package_directory }}" \
-            "$qtifw_binary"
-          appdir="$RUNNER_TEMP/PakeOnlineInstaller.AppDir"
-          mkdir -p "$appdir/usr/share/applications"
-          cp "$qtifw_binary" "$appdir/pake-online-backend"
-          cp "${{ steps.qtifw.outputs.launcher_path }}" "$appdir/AppRun"
-          cp "${{ steps.qtifw.outputs.icon_path }}" "$appdir/pake-app.png"
-          chmod +x "$appdir/AppRun" "$appdir/pake-online-backend"
-          printf '%s\n' \
-            '[Desktop Entry]' \
-            'Type=Application' \
-            "Name=$ONLINE_APP_NAME" \
-            'Exec=AppRun' \
-            'Icon=pake-app' \
-            'Terminal=false' \
-            'Categories=Network;' \
-            > "$appdir/pake-app.desktop"
-          cp "$appdir/pake-app.desktop" \
-            "$appdir/usr/share/applications/pake-app.desktop"
-          appimagetool="$(find "$HOME/.cache/tauri" src-tauri/target \
-            -type f -name 'appimagetool*' 2>/dev/null | head -n 1)"
-          test -n "$appimagetool"
-          chmod +x "$appimagetool"
+          node dist/cli.js --config "$PAKE_BOOTSTRAP_CLI_CONFIG"
+          appimage="$(find . -maxdepth 1 -name '*.AppImage' -type f -print -quit)"
+          test -n "$appimage"
+          count="$(find . -maxdepth 1 -name '*.AppImage' -type f -print \
+            | wc -l | tr -d ' ')"
+          test "$count" -eq 1
           mkdir -p .pake-online-release/online
-          ARCH=x86_64 "$appimagetool" "$appdir" \
-            ".pake-online-release/online/$ONLINE_INSTALLER_NAME"
-
-      - name: Publish QtIFW repository branch
-        if: matrix.config.online
-        shell: bash
-        run: |
-          worktree="$RUNNER_TEMP/pake-online-repository-worktree"
-          git worktree add --detach "$worktree"
-          git -C "$worktree" checkout --orphan qtifw-repository
-          git -C "$worktree" rm -rf --ignore-unmatch .
-          cp -R "${{ steps.qtifw.outputs.repository_directory }}/." "$worktree/"
-          git -C "$worktree" add -A
-          git -C "$worktree" \
-            -c user.name=github-actions \
-            -c user.email=github-actions@github.com \
-            commit -m "Update ${{ matrix.config.id }} online repository"
-          git -C "$worktree" push origin \
-            "HEAD:refs/heads/${{ steps.qtifw.outputs.repository_branch }}" \
-            --force
-          git worktree remove "$worktree" --force
+          cp "$appimage" ".pake-online-release/online/$ONLINE_INSTALLER_NAME"
 
       - name: Upload online installer
         if: matrix.config.online

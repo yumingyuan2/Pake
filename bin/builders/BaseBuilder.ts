@@ -296,7 +296,7 @@ export default abstract class BaseBuilder {
 
     // With --no-bundle there is no installer to copy; surface the raw
     // executable the build produced instead.
-    if (this.options.bundle === false) {
+    if (this.options.bundle === false || this.isWindowsOnlinePayloadBuild()) {
       await this.copyRawBinary(npmDirectory, name);
       await this.recordArtifact(this.getRawBinaryPath(name), 'binary');
       if (logSuccess) {
@@ -461,6 +461,10 @@ export default abstract class BaseBuilder {
   protected getBuildFeatures(): string[] {
     const features = ['cli-build'];
 
+    if (process.env.PAKE_ONLINE_BOOTSTRAP === '1') {
+      features.push('online-bootstrap');
+    }
+
     // Add macos-proxy feature for modern macOS (Darwin 23+ = macOS 14+)
     if (IS_MAC) {
       const macOSVersion = this.getMacOSMajorVersion();
@@ -483,12 +487,23 @@ export default abstract class BaseBuilder {
 
     let fullCommand = this.buildBaseCommand(packageManager, configPath);
 
+    if (this.isWindowsOnlinePayloadBuild()) {
+      fullCommand += ' --no-bundle';
+    }
+
     // For macOS, use app bundles by default unless DMG is explicitly requested
     if (IS_MAC && this.options.targets === 'app') {
       fullCommand += ' --bundles app';
     }
 
     return fullCommand;
+  }
+
+  private isWindowsOnlinePayloadBuild(): boolean {
+    return (
+      process.platform === 'win32' &&
+      process.env.PAKE_WINDOWS_ONLINE_PAYLOAD === '1'
+    );
   }
 
   protected getMacOSMajorVersion(): number {

@@ -5,19 +5,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const ONLINE_MANIFEST_SCHEMA_VERSION = 1;
+export const ONLINE_MANIFEST_SCHEMA_VERSION = 2;
 const MANIFEST_PREFIX = "pake-online-manifest-";
 
 const FORMATS = [
-  [".pkg.tar.zst", "zst"],
-  [".tar.zst", "tar.zst"],
-  [".7z", "7z"],
+  [".exe.zip", "exe.zip"],
+  [".app.zip", "app.zip"],
   [".AppImage", "appimage"],
-  [".msi", "msi"],
-  [".exe", "exe"],
-  [".dmg", "dmg"],
-  [".deb", "deb"],
-  [".rpm", "rpm"],
 ];
 
 function sha256File(filePath) {
@@ -26,9 +20,24 @@ function sha256File(filePath) {
   return hash.digest("hex");
 }
 
-function assetExtension(format) {
-  if (format === "zst") return "pkg.tar.zst";
-  return format;
+function payloadLaunch(config, format, sourcePath) {
+  if (config.os === "windows" && format === "exe.zip") {
+    return { entrypoint: "app.exe", launchKind: "executable" };
+  }
+  if (config.os === "macos" && format === "app.zip") {
+    const entrypoint = path.basename(sourcePath, ".zip");
+    if (!entrypoint.endsWith(".app") || entrypoint === ".app") {
+      throw new Error("The macOS payload archive must preserve its .app name.");
+    }
+    return {
+      entrypoint,
+      launchKind: "appBundle",
+    };
+  }
+  if (config.os === "linux" && format === "appimage") {
+    return { entrypoint: "app.AppImage", launchKind: "executable" };
+  }
+  throw new Error(`Unsupported online payload ${format} for ${config.os}.`);
 }
 
 export function detectArtifactFormat(fileName) {
@@ -72,51 +81,36 @@ export function stageReleaseAssets(config, context) {
   fs.mkdirSync(manifestDirectory, { recursive: true });
 
   const sourceFiles = findInstallerFiles(inputDirectory);
-  if (sourceFiles.length === 0) {
-    throw new Error(`No installer artifacts found in ${inputDirectory}`);
+  if (sourceFiles.length !== 1) {
+    throw new Error(
+      `Expected exactly one online payload in ${inputDirectory}, found ${sourceFiles.length}.`,
+    );
   }
 
   const artifacts = sourceFiles.map((sourcePath) => {
     const format = detectArtifactFormat(path.basename(sourcePath));
-    const name = `${config.id}-${shortSha}.${assetExtension(format)}`;
+    const digest = sha256File(sourcePath);
+    const name = `${config.id}-${shortSha}-${digest.slice(0, 12)}.${format}`;
     const targetPath = path.join(actualDirectory, name);
     fs.copyFileSync(sourcePath, targetPath);
     const size = fs.statSync(targetPath).size;
+    const launch = payloadLaunch(config, format, sourcePath);
     const artifact = {
       name,
       format,
       size,
-      sha256: sha256File(targetPath),
+      sha256: digest,
       downloadUrl: `https://github.com/${config.repository}/releases/download/${config.releaseTag}/${name}`,
       packageId: config.cliConfig.name,
+      ...launch,
     };
-    if (format === "tar.zst") {
-      const metadataPath = `${sourcePath}.json`;
-      if (!fs.existsSync(metadataPath)) {
-        throw new Error(`Windows payload metadata is missing: ${metadataPath}`);
-      }
-      const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
-      if (
-        metadata.format !== "tar.zst" ||
-        !Number.isSafeInteger(metadata.expandedSize) ||
-        metadata.expandedSize <= 0 ||
-        typeof metadata.executableName !== "string" ||
-        typeof metadata.executableSha256 !== "string"
-      ) {
-        throw new Error(`Windows payload metadata is invalid: ${metadataPath}`);
-      }
-      artifact.expandedSize = metadata.expandedSize;
-      artifact.executableName = metadata.executableName;
-      artifact.executableSha256 = metadata.executableSha256;
-      artifact.packageId = config.id;
-    }
     return artifact;
   });
 
   const onlineInstaller = {
     name: onlineInstallerAssetName(config),
   };
-  const manifestName = `${MANIFEST_PREFIX}${shortSha}-${context.runAttempt ?? "1"}.json`;
+  const manifestName = `${MANIFEST_PREFIX}${shortSha}-${artifacts[0].sha256.slice(0, 12)}.json`;
   const manifest = {
     schemaVersion: ONLINE_MANIFEST_SCHEMA_VERSION,
     configId: config.id,

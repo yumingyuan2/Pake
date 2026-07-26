@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 export const ONLINE_CONFIG_SCHEMA_VERSION = 1;
 export const ONLINE_CONFIG_BRANCH = "pake-online-config";
+export const ONLINE_BOOTSTRAP_VERSION = "255.0.0";
 
 const PLATFORM_MAP = {
   "windows-latest": "windows",
@@ -103,13 +104,29 @@ export function normalizeReleaseVersion(tagName) {
 
 export function applyOnlineReleaseVersion(config, releaseTag) {
   if (!config.online) return config;
+  const targets =
+    config.os === "linux"
+      ? "appimage"
+      : config.os === "macos"
+        ? "app"
+        : config.cliConfig.targets;
   return {
     ...config,
     cliConfig: {
       ...config.cliConfig,
       appVersion: normalizeReleaseVersion(releaseTag),
-      ...(config.os === "linux" ? { targets: "appimage" } : {}),
+      targets,
     },
+  };
+}
+
+export function createBootstrapCliConfig(config) {
+  const targets =
+    config.os === "linux" ? "appimage" : config.os === "macos" ? "dmg" : "msi";
+  return {
+    ...config.cliConfig,
+    appVersion: ONLINE_BOOTSTRAP_VERSION,
+    targets,
   };
 }
 
@@ -318,10 +335,10 @@ function runCli() {
   }
 
   if (command === "runtime") {
-    const [buildConfigPath, cliConfigPath] = args;
-    if (!buildConfigPath || !cliConfigPath) {
+    const [buildConfigPath, cliConfigPath, bootstrapCliConfigPath] = args;
+    if (!buildConfigPath || !cliConfigPath || !bootstrapCliConfigPath) {
       throw new Error(
-        "runtime requires build config and CLI config output paths",
+        "runtime requires build, payload CLI, and bootstrap CLI output paths",
       );
     }
     const config = applyOnlineReleaseVersion(
@@ -332,6 +349,10 @@ function runCli() {
     fs.writeFileSync(
       cliConfigPath,
       `${JSON.stringify(config.cliConfig, null, 2)}\n`,
+    );
+    fs.writeFileSync(
+      bootstrapCliConfigPath,
+      `${JSON.stringify(createBootstrapCliConfig(config), null, 2)}\n`,
     );
     return;
   }

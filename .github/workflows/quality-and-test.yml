@@ -184,146 +184,28 @@ jobs:
         with:
           mode: build
 
-      - name: Install Qt Installer Framework
-        shell: bash
-        run: bash scripts/pake-online/install-qtifw.sh
+      - name: Test online bootstrap
+        env:
+          PAKE_ONLINE_REPOSITORY: example/Pake
+          PAKE_ONLINE_RELEASE_TAG: pake-online-ci
+          PAKE_ONLINE_CONFIG_ID: ci-${{ runner.os }}
+          PAKE_ONLINE_OS: ${{ runner.os == 'Windows' && 'windows' || runner.os == 'macOS' && 'macos' || 'linux' }}
+        run: >-
+          cargo test --locked
+          --manifest-path src-tauri/Cargo.toml
+          --features online-bootstrap
+          online::tests
 
-      - name: Install macOS DMG layout tool
-        if: runner.os == 'macOS'
-        shell: bash
-        run: brew install create-dmg
-
-      - name: Build and verify QtIFW online installer
-        shell: bash
-        timeout-minutes: 30
-        run: |
-          set -euo pipefail
-          case "$RUNNER_OS" in
-            Windows)
-              config_os=windows
-              payload="$(cygpath -w "$(command -v node)")"
-              target="$RUNNER_TEMP/online-installer.exe"
-              ;;
-            macOS)
-              config_os=macos
-              payload="$RUNNER_TEMP/CI App.app"
-              mkdir -p "$payload/Contents/MacOS"
-              printf '#!/bin/sh\nexit 0\n' > "$payload/Contents/MacOS/ci-app"
-              chmod +x "$payload/Contents/MacOS/ci-app"
-              target="$RUNNER_TEMP/online-installer.app"
-              ;;
-            Linux)
-              config_os=linux
-              payload="$RUNNER_TEMP/CI.AppImage"
-              printf '#!/bin/sh\nexit 0\n' > "$payload"
-              chmod +x "$payload"
-              target="$RUNNER_TEMP/online-installer"
-              ;;
-          esac
-          config="$RUNNER_TEMP/qtifw-ci-config.json"
-          node -e '
-            const fs = require("fs");
-            fs.writeFileSync(process.argv[1], JSON.stringify({
-              id: `ci-${process.argv[2]}`,
-              repository: "example/Pake",
-              sourceBranch: "main",
-              os: process.argv[2],
-              cliConfig: { name: "CI App", appVersion: "1.0.0" }
-            }));
-          ' "$config" "$config_os"
-          node scripts/pake-online/qtifw.mjs prepare \
-            "$config" "$payload" "$RUNNER_TEMP/qtifw-workspace" 1
-          suffix=""
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            suffix=".exe"
-          fi
-          "$QTIFW_BIN/repogen$suffix" --remove --ac 9 \
-            -p "$RUNNER_TEMP/qtifw-workspace/packages" \
-            "$RUNNER_TEMP/qtifw-workspace/repository"
-          archive_suffix="$(
-            node -e '
-              const fs = require("fs");
-              const xml = fs.readFileSync(process.argv[1], "utf8");
-              const match = xml.match(
-                /<DownloadableArchives>([^<]+)<\/DownloadableArchives>/,
-              );
-              if (!match) throw new Error("QtIFW repository has no payload archive.");
-              const names = match[1].split(",").map((name) => name.trim());
-              if (names.length !== 1) {
-                throw new Error(`Expected one QtIFW payload archive, found ${names.length}.`);
-              }
-              process.stdout.write(names[0]);
-            ' "$RUNNER_TEMP/qtifw-workspace/repository/Updates.xml"
-          )"
-          archive="$(find "$RUNNER_TEMP/qtifw-workspace/repository" \
-            -name "*$archive_suffix" -type f -print -quit)"
-          test -n "$archive"
-          count="$(find "$RUNNER_TEMP/qtifw-workspace/repository" \
-            -name "*$archive_suffix" -type f -print | wc -l | tr -d ' ')"
-          test "$count" -eq 1
-          "$QTIFW_BIN/binarycreator$suffix" --online-only \
-            -c "$RUNNER_TEMP/qtifw-workspace/config/config.xml" \
-            -p "$RUNNER_TEMP/qtifw-workspace/packages" \
-            "$target"
-          test -e "$target"
-          case "$RUNNER_OS" in
-            Windows)
-              candle.exe -arch x64 \
-                "-dQtIfwSource=$(cygpath -w "$target")" \
-                "-dLauncherSource=$(cygpath -w "$RUNNER_TEMP/qtifw-workspace/windows-launcher.ps1")" \
-                "-dIconSource=$(cygpath -w "$GITHUB_WORKSPACE/src-tauri/png/icon_256.ico")" \
-                -out "$RUNNER_TEMP/online-installer.wixobj" \
-                "$RUNNER_TEMP/qtifw-workspace/online-installer.wxs"
-              light.exe -sval -ext WixUIExtension \
-                -out "$RUNNER_TEMP/online-installer.msi" \
-                "$RUNNER_TEMP/online-installer.wixobj"
-              test -s "$RUNNER_TEMP/online-installer.msi"
-              ;;
-            macOS)
-              executable="$(
-                /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
-                  "$target/Contents/Info.plist"
-              )"
-              mv "$target/Contents/MacOS/$executable" \
-                "$target/Contents/MacOS/pake-online-backend"
-              swiftc "$RUNNER_TEMP/qtifw-workspace/macos-launcher.swift" \
-                -framework AppKit -o "$target/Contents/MacOS/$executable"
-              codesign --force --deep --sign - "$target"
-              mkdir -p "$RUNNER_TEMP/dmg-source"
-              cp -R "$target" "$RUNNER_TEMP/dmg-source/"
-              if ! create-dmg \
-                --no-internet-enable \
-                --volname "CI App" \
-                --background "src-tauri/assets/macos/dmg/background.png" \
-                --window-size 680 420 \
-                --icon "online-installer.app" 190 250 \
-                --app-drop-link 500 250 \
-                "$RUNNER_TEMP/online-installer.dmg" \
-                "$RUNNER_TEMP/dmg-source"; then
-                test -s "$RUNNER_TEMP/online-installer.dmg"
-                hdiutil verify "$RUNNER_TEMP/online-installer.dmg"
-              fi
-              test -s "$RUNNER_TEMP/online-installer.dmg"
-              ;;
-            Linux)
-              appdir="$RUNNER_TEMP/CI.AppDir"
-              mkdir -p "$appdir/usr/share/applications"
-              cp "$target" "$appdir/pake-online-backend"
-              cp "$RUNNER_TEMP/qtifw-workspace/linux-launcher.sh" \
-                "$appdir/AppRun"
-              cp "src-tauri/png/icon_512.png" "$appdir/pake-app.png"
-              printf '%s\n' \
-                '[Desktop Entry]' \
-                'Type=Application' \
-                'Name=CI App' \
-                'Exec=AppRun' \
-                'Icon=pake-app' \
-                'Terminal=false' \
-                > "$appdir/pake-app.desktop"
-              test -x "$appdir/AppRun"
-              grep -q '^Name=CI App$' "$appdir/pake-app.desktop"
-              ;;
-          esac
+      - name: Build release online bootstrap
+        env:
+          PAKE_ONLINE_REPOSITORY: example/Pake
+          PAKE_ONLINE_RELEASE_TAG: pake-online-ci
+          PAKE_ONLINE_CONFIG_ID: ci-${{ runner.os }}
+          PAKE_ONLINE_OS: ${{ runner.os == 'Windows' && 'windows' || runner.os == 'macOS' && 'macos' || 'linux' }}
+        run: >-
+          cargo build --locked --release
+          --manifest-path src-tauri/Cargo.toml
+          --features online-bootstrap
 
       - name: Build and verify offline EXE wrapper
         if: runner.os == 'Windows'

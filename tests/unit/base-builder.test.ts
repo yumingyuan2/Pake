@@ -34,6 +34,8 @@ class TestBuilder extends BaseBuilder {
 
 const originalCnMirrorEnv = process.env[CN_MIRROR_ENV];
 const originalCargoTargetDir = process.env.CARGO_TARGET_DIR;
+const originalOnlineBootstrap = process.env.PAKE_ONLINE_BOOTSTRAP;
+const originalWindowsOnlinePayload = process.env.PAKE_WINDOWS_ONLINE_PAYLOAD;
 const tempDirs: string[] = [];
 
 const GENERATED_MIRROR_CONFIG = `[source.crates-io]
@@ -101,6 +103,17 @@ describe('BaseBuilder guards', () => {
       delete process.env.CARGO_TARGET_DIR;
     } else {
       process.env.CARGO_TARGET_DIR = originalCargoTargetDir;
+    }
+
+    if (originalOnlineBootstrap === undefined) {
+      delete process.env.PAKE_ONLINE_BOOTSTRAP;
+    } else {
+      process.env.PAKE_ONLINE_BOOTSTRAP = originalOnlineBootstrap;
+    }
+    if (originalWindowsOnlinePayload === undefined) {
+      delete process.env.PAKE_WINDOWS_ONLINE_PAYLOAD;
+    } else {
+      process.env.PAKE_WINDOWS_ONLINE_PAYLOAD = originalWindowsOnlinePayload;
     }
 
     await Promise.all(tempDirs.splice(0).map((dir) => fsExtra.remove(dir)));
@@ -308,6 +321,30 @@ describe('BaseBuilder guards', () => {
     expect(command).toContain('--features cli-build');
   });
 
+  it('adds the windowless online bootstrap feature only when requested', () => {
+    const builder = new TestBuilder({
+      debug: false,
+      targets: 'msi',
+    } as any);
+
+    delete process.env.PAKE_ONLINE_BOOTSTRAP;
+    expect((builder as any).getBuildFeatures()).toEqual(['cli-build']);
+
+    process.env.PAKE_ONLINE_BOOTSTRAP = '1';
+    expect((builder as any).getBuildFeatures()).toContain('online-bootstrap');
+  });
+
+  it('uses a raw Windows executable for an online payload build', () => {
+    if (process.platform !== 'win32') return;
+    const builder = new TestBuilder({
+      debug: false,
+      targets: 'msi',
+    } as any);
+    process.env.PAKE_WINDOWS_ONLINE_PAYLOAD = '1';
+
+    expect((builder as any).getBuildCommand('pnpm')).toContain('--no-bundle');
+  });
+
   it('copies Windows build artifacts from CARGO_TARGET_DIR when it is set', () => {
     const cargoTargetDir = path.join(process.cwd(), '.short-cargo-target');
     process.env.CARGO_TARGET_DIR = cargoTargetDir;
@@ -357,6 +394,9 @@ describe('BaseBuilder guards', () => {
     expect(buildScript).toContain('cargo:rerun-if-changed=.pake/pake.json');
     expect(buildScript).toContain(
       'cargo:rerun-if-changed=.pake/tauri.conf.json',
+    );
+    expect(buildScript).toContain(
+      'cargo:rerun-if-env-changed=PAKE_ONLINE_REPOSITORY',
     );
   });
 });

@@ -52,34 +52,34 @@ Windows 在线安装器的图标 URL。ICO 会直接使用；SVG、PNG、JPEG �
 中，工作流会读取其上游父仓库的最新 Release；非在线构建仍使用表单中的
 `app_version`。
 
-预发布会同时提供版本化 Qt Installer Framework 组件归档和在线安装器。Pake
-使用开源的 Qt Installer Framework（QtIFW），不再维护自制 WebView 安装器。
-QtIFW 作为可扩展的下载和校验后端无界面运行，不会再弹出第二套安装向导；用户
-看到的载体直接复用离线包的应用名、图标和各平台原生外观。
+预发布会同时提供压缩后的真实应用负载和轻量在线引导程序。引导程序是一个完全
+无窗口的 Pake 构建，不是第二个 Tauri 工程，也不依赖外部安装框架。它使用与
+离线构建相同的 Tauri 原生打包器，因此应用名、图标、快捷方式和安装页面均与
+离线包保持一致。
 
 - Windows：`online_windows_format` 可选择应用专属 `.msi` 或 `.exe`。MSI
-  使用与离线 MSI 相同的 WiX 页面顺序和品牌外观，安装过程中由 QtIFW 在后台
-  下载；EXE 是对同一个在线 MSI 的完全无窗口包装。`online_exe_icon` 同时控制
-  包装器和安装器图标。载体版本固定为 `255.0.0`，下载的应用仍使用 Pake 最新
-  正式 Release 版本。
-- macOS：`.dmg` 复用离线 DMG 的背景、窗口大小、图标位置和 Applications
-  拖放入口；其中的 `.app` 使用正常应用名和图标，打开后在后台下载并启动应用。
-- Linux：`.AppImage` 使用正常应用名和图标，打开后由 QtIFW 在后台下载，再
-  启动最新的应用 AppImage。
+  就是正常的 Pake WiX 安装包；EXE 是对同一个 MSI 的完全无窗口包装，
+  `online_exe_icon` 控制包装器图标。引导程序版本固定为 `255.0.0`，真实应用
+  负载仍使用 Pake 最新正式 Release 版本。
+- macOS：`.dmg` 由正常的 Pake DMG 打包器生成，其中的应用使用配置的名称和图标。
+- Linux：`.AppImage` 由正常的 Pake AppImage 打包器生成，并使用配置的名称和图标。
+
+首次启动应用时，引导程序会静默下载、校验并启动最新的真实应用。以后启动时会
+立即打开本地缓存的应用，同时在后台检查更新；下载完成的新版本会在下次启动时
+启用。整个过程不会显示控制台、更新进度窗口或第二套安装界面。
 
 在线模式运行时，Actions 的 **Artifacts** 区域只提供在线安装引导器；如需真实
 负载或原生软件包，请打开对应的滚动预发布。非在线模式仍只上传常规离线包，并
 保留 3 天。
 
-三个平台统一使用 QtIFW 的最高压缩级别 7z 在线仓库格式。每套配置拥有独立的
-`pake-online-repository-<config-id>` 分支，只有应用和在线载体都构建成功后才会
-更新。QtIFW 会在后台验证仓库元数据与归档摘要。滚动 Release 继续只保留当前
-和上一个成功组件归档及 manifest。
+Windows 真实负载使用 ZIP 压缩的可执行文件，macOS 使用压缩后的应用包，Linux
+保留本身已压缩的 AppImage。引导程序只接受其内置仓库和滚动 Release tag 下的
+HTTPS 资产，并在启用前校验 manifest、字节数和 SHA-256。滚动 Release 只保留
+当前和上一个成功负载及 manifest。
 
-QtIFW 获取仓库元数据前，仓库内的控制脚本会查询 Cloudflare 国家信息。在中国
-大陆时把 `https://github.com/owner/repo/raw/...` 改写成
-`https://v4.gh-proxy.org/https://github.com/owner/repo/raw/...`；其他地区直接
-使用 GitHub。
+下载 GitHub 资产前，引导程序会查询 Cloudflare 国家信息。在中国大陆时优先使用
+`https://v4.gh-proxy.org/https://github.com/owner/repo/releases/download/...`，
+失败后回退到 GitHub；其他地区直接使用 GitHub。
 
 ### 前置条件与限制
 
@@ -91,11 +91,10 @@ QtIFW 获取仓库元数据前，仓库内的控制脚本会查询 Cloudflare �
   `enable-or-update` 会更新已保存配置。
 - 在同一应用、平台和分支下选择 `pause` 可停止后续 push 自动构建；最后一次
   预发布仍然保留。
-- 配置保存在 `pake-online-config` 分支；QtIFW 仓库使用独立的
-  `pake-online-repository-<config-id>` 分支。每套配置都会在匹配分支的每次
-  push 中占用一个 runner。
-- Windows 的 MSI 外壳按系统安装，真实应用负载保存在用户目录；macOS 和 Linux
-  的真实应用负载也保存在用户级目录。
+- 配置保存在 `pake-online-config` 分支。每套配置都会在匹配分支的每次 push
+  中占用一个 runner。
+- 原生安装包会正常安装引导程序；三个平台下载的真实应用均保存在当前用户的
+  Pake 数据目录。
 
 ## 提示
 

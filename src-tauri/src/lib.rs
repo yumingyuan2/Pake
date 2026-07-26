@@ -1,24 +1,33 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(not(feature = "online-bootstrap"))]
 mod app;
+#[cfg(feature = "online-bootstrap")]
+mod online;
+#[cfg(not(feature = "online-bootstrap"))]
 mod util;
 
+#[cfg(not(feature = "online-bootstrap"))]
 use tauri::Manager;
+#[cfg(not(feature = "online-bootstrap"))]
 use tauri_plugin_window_state::Builder as WindowStatePlugin;
+#[cfg(not(feature = "online-bootstrap"))]
 use tauri_plugin_window_state::StateFlags;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "online-bootstrap")))]
 use std::time::Duration;
 
+#[cfg(not(feature = "online-bootstrap"))]
 const WINDOW_SHOW_DELAY: u64 = 50;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "online-bootstrap")))]
 const PAKE_LINUX_WEBKIT_SAFE_MODE: &str = "PAKE_LINUX_WEBKIT_SAFE_MODE";
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "online-bootstrap")))]
 const WEBKIT_DISABLE_DMABUF_RENDERER: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "online-bootstrap")))]
 const WEBKIT_DISABLE_COMPOSITING_MODE: &str = "WEBKIT_DISABLE_COMPOSITING_MODE";
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "online-bootstrap")))]
 const GDK_BACKEND: &str = "GDK_BACKEND";
 
+#[cfg(not(feature = "online-bootstrap"))]
 use app::{
     invoke::{
         clear_dock_badge, download_file, increment_dock_badge, send_notification, set_dock_badge,
@@ -27,9 +36,10 @@ use app::{
     setup::{set_global_shortcut, set_system_tray},
     window::{open_additional_window_safe, reapply_window_icon, set_window, MultiWindowState},
 };
+#[cfg(not(feature = "online-bootstrap"))]
 use util::get_pake_config;
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(test, all(target_os = "linux", not(feature = "online-bootstrap"))))]
 fn is_disabled_env_value(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
@@ -37,19 +47,19 @@ fn is_disabled_env_value(value: &str) -> bool {
     )
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(test, all(target_os = "linux", not(feature = "online-bootstrap"))))]
 fn is_non_empty_env_value(value: Option<&str>) -> bool {
     value.map(|value| !value.trim().is_empty()).unwrap_or(false)
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(test, all(target_os = "linux", not(feature = "online-bootstrap"))))]
 fn contains_niri(value: &str) -> bool {
     value
         .split([':', ';', ',', ' '])
         .any(|part| part.eq_ignore_ascii_case("niri"))
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(test, all(target_os = "linux", not(feature = "online-bootstrap"))))]
 fn should_enable_linux_webkit_safe_mode_from_values(
     safe_mode: Option<&str>,
     niri_socket: Option<&str>,
@@ -68,7 +78,7 @@ fn should_enable_linux_webkit_safe_mode_from_values(
     !is_niri_session
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(test, all(target_os = "linux", not(feature = "online-bootstrap"))))]
 fn should_force_wayland_gdk_backend(
     gdk_backend: Option<&str>,
     wayland_display: Option<&str>,
@@ -85,7 +95,7 @@ fn should_force_wayland_gdk_backend(
     is_non_empty_env_value(wayland_display) && !is_non_empty_env_value(display)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "online-bootstrap")))]
 fn apply_linux_gdk_backend() {
     if should_force_wayland_gdk_backend(
         std::env::var(GDK_BACKEND).ok().as_deref(),
@@ -96,7 +106,7 @@ fn apply_linux_gdk_backend() {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "online-bootstrap")))]
 fn apply_linux_webkit_runtime_flags() {
     let safe_mode = std::env::var(PAKE_LINUX_WEBKIT_SAFE_MODE).ok();
     if safe_mode.as_deref().is_some_and(is_disabled_env_value) {
@@ -131,6 +141,12 @@ fn apply_linux_webkit_runtime_flags() {
     }
 }
 
+#[cfg(feature = "online-bootstrap")]
+pub fn run_app() {
+    online::run();
+}
+
+#[cfg(not(feature = "online-bootstrap"))]
 pub fn run_app() {
     #[cfg(target_os = "linux")]
     {
