@@ -2,15 +2,22 @@
 
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import iconGenModule from "icon-gen";
-import sharp from "sharp";
-
 const MAX_ICON_BYTES = 10 * 1024 * 1024;
 const ICON_SIZES = [16, 24, 32, 48, 64, 128, 256];
-const generateIcon = iconGenModule.default ?? iconGenModule;
+const require = createRequire(import.meta.url);
+
+function loadIconConverters() {
+  const iconGenModule = require("icon-gen");
+  const sharpModule = require("sharp");
+  return {
+    generateIcon: iconGenModule.default ?? iconGenModule,
+    sharp: sharpModule.default ?? sharpModule,
+  };
+}
 
 export function normalizeIconUrl(value) {
   const url = new URL(String(value));
@@ -70,6 +77,7 @@ export async function writeWindowsIcon(buffer, outputPath) {
     path.join(path.dirname(absoluteOutput), ".pake-icon-"),
   );
   try {
+    const { generateIcon, sharp } = loadIconConverters();
     await Promise.all(
       ICON_SIZES.map((size) =>
         sharp(buffer)
