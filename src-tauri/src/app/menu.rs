@@ -1,7 +1,10 @@
 // Menu functionality is only used on macOS; the module is gated in app/mod.rs.
+use crate::app::navigation::{history_step, reload_window};
 use crate::app::window::{open_additional_window_safe, MultiWindowState};
+use std::io::Write;
+use std::process::{Command, Stdio};
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Manager, Wry};
+use tauri::{AppHandle, Manager, WebviewWindow, Wry};
 use tauri_plugin_opener::OpenerExt;
 
 pub fn set_app_menu(
@@ -245,6 +248,27 @@ fn home_url(app: &AppHandle) -> Option<tauri::Url> {
     resolve_home_url(&window_config.url_type, &window_config.url)
 }
 
+fn focused_webview_window(app_handle: &AppHandle) -> Option<WebviewWindow> {
+    let windows = app_handle.webview_windows();
+    windows
+        .values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .cloned()
+        .or_else(|| windows.get("pake").cloned())
+}
+
+/// Copy text via pbcopy so it works when the page has no JS context (error
+/// shells) and when the Clipboard API is blocked by the site CSP.
+fn copy_text_to_pasteboard(text: &str) {
+    let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() else {
+        return;
+    };
+    if let Some(stdin) = child.stdin.as_mut() {
+        let _ = stdin.write_all(text.as_bytes());
+    }
+    let _ = child.wait();
+}
+
 pub fn handle_menu_click(app_handle: &AppHandle, id: &str) {
     match id {
         "new_window" => {
@@ -256,13 +280,14 @@ pub fn handle_menu_click(app_handle: &AppHandle, id: &str) {
                 .open_url("https://github.com/tw93/Pake", None::<&str>);
         }
         "reload" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
-                let _ = window.eval("window.location.reload()");
+            if let Some(window) = focused_webview_window(app_handle) {
+                // Native reload works on blank error pages where eval cannot.
+                reload_window(&window);
             }
         }
         "toggle_devtools" => {
             #[cfg(debug_assertions)] // Only allow in debug builds
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 if window.is_devtools_open() {
                     window.close_devtools();
                 } else {
@@ -271,32 +296,32 @@ pub fn handle_menu_click(app_handle: &AppHandle, id: &str) {
             }
         }
         "zoom_in" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 let _ = window.eval("zoomIn()");
             }
         }
         "zoom_out" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 let _ = window.eval("zoomOut()");
             }
         }
         "zoom_reset" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 let _ = window.eval("setZoom('100%')");
             }
         }
         "go_back" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
-                let _ = window.eval("window.history.back()");
+            if let Some(window) = focused_webview_window(app_handle) {
+                history_step(&window, true);
             }
         }
         "go_forward" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
-                let _ = window.eval("window.history.forward()");
+            if let Some(window) = focused_webview_window(app_handle) {
+                history_step(&window, false);
             }
         }
         "go_home" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 // Native navigation works even from a blank error page (where
                 // eval cannot run) and resolves local-file apps to the correct
                 // bundled asset instead of a path on the current origin.
@@ -311,39 +336,43 @@ pub fn handle_menu_click(app_handle: &AppHandle, id: &str) {
             }
         }
         "copy_url" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
-                let _ = window.eval("navigator.clipboard.writeText(window.location.href)");
+            if let Some(window) = focused_webview_window(app_handle) {
+                // Prefer the native webview URL so copy still works on error
+                // pages that have no document.location / clipboard API.
+                if let Ok(url) = window.url() {
+                    copy_text_to_pasteboard(url.as_str());
+                }
             }
         }
         "paste_and_match_style" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 let _ = window.eval("triggerPasteAsPlainText()");
             }
         }
         "find" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 let _ = window.eval("window.pakeFind?.open()");
             }
         }
         "find_next" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 let _ = window.eval("window.pakeFind?.next()");
             }
         }
         "find_previous" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 let _ = window.eval("window.pakeFind?.previous()");
             }
         }
         "clear_cache_restart" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 if window.clear_all_browsing_data().is_ok() {
                     app_handle.restart();
                 }
             }
         }
         "always_on_top" => {
-            if let Some(window) = app_handle.get_webview_window("pake") {
+            if let Some(window) = focused_webview_window(app_handle) {
                 let is_on_top = window.is_always_on_top().unwrap_or(false);
                 let _ = window.set_always_on_top(!is_on_top);
             }

@@ -1,10 +1,13 @@
-use crate::app::window::{open_additional_window_safe, reapply_window_icon};
+use crate::app::window::{
+    hide_all_app_windows, open_additional_window_safe, show_all_app_windows, toggle_all_app_windows,
+};
+use crate::cancel_startup_reveal;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
-    tray::{TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
@@ -16,6 +19,7 @@ pub fn set_system_tray(
     tray_icon_path: &str,
     _init_fullscreen: bool,
     allow_multi_window: bool,
+    startup_revealed: Arc<AtomicBool>,
 ) -> tauri::Result<()> {
     if !show_system_tray {
         app.remove_tray_by_id("pake-tray");
@@ -42,6 +46,8 @@ pub fn set_system_tray(
 
     app.app_handle().remove_tray_by_id("pake-tray");
 
+    let menu_revealed = startup_revealed.clone();
+    let click_revealed = startup_revealed;
     let mut tray_builder = TrayIconBuilder::new()
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -49,20 +55,13 @@ pub fn set_system_tray(
                 open_additional_window_safe(app);
             }
             "hide_app" => {
-                if let Some(window) = app.get_webview_window("pake") {
-                    let _ = window.minimize();
-                }
+                // Hide every webview (main + multi-window clones), not only "pake".
+                cancel_startup_reveal(&menu_revealed);
+                hide_all_app_windows(app);
             }
             "show_app" => {
-                if let Some(window) = app.get_webview_window("pake") {
-                    let _ = window.show();
-                    reapply_window_icon(&window);
-                    #[cfg(target_os = "linux")]
-                    if _init_fullscreen && !window.is_fullscreen().unwrap_or(false) {
-                        let _ = window.set_fullscreen(true);
-                        let _ = window.set_focus();
-                    }
-                }
+                cancel_startup_reveal(&menu_revealed);
+                show_all_app_windows(app, _init_fullscreen);
             }
             "quit" => {
                 let flags = if _init_fullscreen {
@@ -76,22 +75,19 @@ pub fn set_system_tray(
             _ => (),
         })
         .on_tray_icon_event(move |tray, event| {
-            if let TrayIconEvent::Click { button, .. } = event {
-                if button == tauri::tray::MouseButton::Left {
-                    if let Some(window) = tray.app_handle().get_webview_window("pake") {
-                        let is_visible = window.is_visible().unwrap_or(false);
-                        if is_visible {
-                            let _ = window.hide();
-                        } else {
-                            let _ = window.show();
-                            reapply_window_icon(&window);
-                            let _ = window.set_focus();
-                            #[cfg(target_os = "linux")]
-                            if _init_fullscreen && !window.is_fullscreen().unwrap_or(false) {
-                                let _ = window.set_fullscreen(true);
-                            }
-                        }
-                    }
+            if let TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
+                // Windows emits Click twice per physical click (Down then Up).
+                // Reacting to both runs the toggle twice, so a hidden window is
+                // shown and immediately re-hidden and the tray looks dead (#1343).
+                if button == MouseButton::Left && button_state == MouseButtonState::Up {
+                    // Any tray toggle claims visibility control from startup reveal.
+                    cancel_startup_reveal(&click_revealed);
+                    toggle_all_app_windows(tray.app_handle(), _init_fullscreen);
                 }
             }
         });
@@ -120,6 +116,7 @@ pub fn set_global_shortcut(
     app: &AppHandle,
     shortcut: String,
     _init_fullscreen: bool,
+    startup_revealed: Arc<AtomicBool>,
 ) -> tauri::Result<()> {
     if shortcut.is_empty() {
         return Ok(());
@@ -139,6 +136,7 @@ pub fn set_global_shortcut(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler({
                 let last_triggered = Arc::clone(&last_triggered);
+                let startup_revealed = startup_revealed.clone();
                 move |app, event, _shortcut| {
                     let Ok(mut last_triggered) = last_triggered.lock() else {
                         return;
@@ -149,20 +147,8 @@ pub fn set_global_shortcut(
                     *last_triggered = Instant::now();
 
                     if shortcut_hotkey.eq(event) {
-                        if let Some(window) = app.get_webview_window("pake") {
-                            let is_visible = window.is_visible().unwrap_or(false);
-                            if is_visible {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                reapply_window_icon(&window);
-                                let _ = window.set_focus();
-                                #[cfg(target_os = "linux")]
-                                if _init_fullscreen && !window.is_fullscreen().unwrap_or(false) {
-                                    let _ = window.set_fullscreen(true);
-                                }
-                            }
-                        }
+                        cancel_startup_reveal(&startup_revealed);
+                        toggle_all_app_windows(app, _init_fullscreen);
                     }
                 }
             })

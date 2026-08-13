@@ -27,6 +27,7 @@ const SEMVER_PATTERN =
 const BOOLEAN_INPUTS = [
   ["fullscreen", "fullscreen"],
   ["hide_title_bar", "hideTitleBar"],
+  ["new_window", "newWindow"],
   ["multi_arch", "multiArch"],
 ];
 

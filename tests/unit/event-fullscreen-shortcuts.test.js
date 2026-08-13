@@ -42,6 +42,8 @@ function loadEventHelpers({
   const eventListeners = {};
   const elementsById = new Map();
   const fullscreenCalls = [];
+  const reloadCalls = [];
+  const navigateCalls = [];
   const body = createElement("body");
   body.appendChild = (child) => {
     body.children.push(child);
@@ -81,7 +83,7 @@ function loadEventHelpers({
         href: "https://example.com/app",
         origin: "https://example.com",
         pathname: "/app",
-        reload: () => {},
+        reload: () => reloadCalls.push(true),
       },
       localStorage: {
         getItem: () => null,
@@ -104,7 +106,12 @@ function loadEventHelpers({
       },
       __TAURI__: {
         core: {
-          invoke: () => Promise.resolve(),
+          invoke: (command, payload) => {
+            if (command === "webview_navigate") {
+              navigateCalls.push(payload?.action);
+            }
+            return Promise.resolve();
+          },
         },
         window: {
           getCurrentWindow: () => ({
@@ -145,6 +152,8 @@ function loadEventHelpers({
     ...context,
     eventListeners,
     fullscreenCalls,
+    reloadCalls,
+    navigateCalls,
     get isFullscreen() {
       return isFullscreen;
     },
@@ -154,6 +163,12 @@ function loadEventHelpers({
 function getFullscreenShortcutHandler(context) {
   return context.eventListeners.keydown.find(
     ({ handler }) => handler.name === "handleWindowFullscreenShortcut",
+  ).handler;
+}
+
+function getWebShortcutHandler(context) {
+  return context.eventListeners.keyup.find(
+    ({ handler }) => handler.name === "handleWebShortcut",
   ).handler;
 }
 
@@ -173,6 +188,44 @@ function createKeyEvent(key, overrides = {}) {
 }
 
 describe("event fullscreen shortcuts", () => {
+  it("leaves macOS reload shortcuts to the native menu", () => {
+    const context = loadEventHelpers({
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
+      platform: "MacIntel",
+    });
+    const event = createKeyEvent("r", { metaKey: true });
+
+    getWebShortcutHandler(context)(event);
+
+    expect(context.reloadCalls).toEqual([]);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("keeps Ctrl+R web shortcuts on Windows and Linux", () => {
+    const context = loadEventHelpers();
+    const event = createKeyEvent("r", { ctrlKey: true });
+
+    getWebShortcutHandler(context)(event);
+
+    // Native webview_navigate so blank error pages still reload.
+    expect(context.navigateCalls).toEqual(["reload"]);
+    expect(event.preventDefault).toHaveBeenCalled();
+  });
+
+  it("keeps macOS scroll-to-edge shortcuts in the webview", () => {
+    const context = loadEventHelpers({
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15",
+      platform: "MacIntel",
+    });
+    const event = createKeyEvent("ArrowUp", { metaKey: true });
+
+    getWebShortcutHandler(context)(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+  });
+
   it("toggles native fullscreen on F11 for Windows", async () => {
     const context = loadEventHelpers();
     const handler = getFullscreenShortcutHandler(context);

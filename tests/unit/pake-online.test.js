@@ -48,6 +48,7 @@ function sampleInputs(overrides = {}) {
     app_version: "1.2.3",
     fullscreen: false,
     hide_title_bar: false,
+    new_window: false,
     multi_arch: false,
     targets: "deb",
     online_mode: true,
@@ -108,6 +109,7 @@ describe("Pake online build configuration", () => {
       sampleInputs({
         min_width: "640",
         fullscreen: true,
+        new_window: true,
         offline_exe: true,
         online_windows_format: "exe",
         offline_exe_icon: "https://example.com/offline.ico",
@@ -131,6 +133,7 @@ describe("Pake online build configuration", () => {
       appVersion: "1.2.3",
       targets: "msi",
       fullscreen: true,
+      newWindow: true,
     });
   });
 

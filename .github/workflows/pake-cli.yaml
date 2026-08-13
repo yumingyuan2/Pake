@@ -57,6 +57,11 @@ on:
         required: false
         type: boolean
         default: false
+      new_window:
+        description: "Allow sites to open new windows"
+        required: false
+        type: boolean
+        default: false
       multi_arch:
         description: "Universal binary (macOS only)"
         required: false
