@@ -459,7 +459,13 @@ jobs:
       - name: Stage Windows online payload
         if: matrix.config.online && runner.os == 'Windows'
         run: |
-          $payloads = @(Get-ChildItem -File -Filter "*.exe")
+          $payloads = @(
+            Get-ChildItem "src-tauri\target" -Recurse -File -Filter "pake-*.exe" |
+              Where-Object {
+                $_.Directory.Name -eq "release" -and
+                $_.FullName -notmatch '\\bundle\\'
+              }
+          )
           if ($payloads.Count -ne 1) {
             throw "Expected exactly one Windows payload, found $($payloads.Count)."
           }

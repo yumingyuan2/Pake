@@ -447,6 +447,10 @@ describe("Build App With Pake CLI online workflow", () => {
     expect(workflow).toContain("pake-bootstrap-cli-config.json");
     expect(workflow).toContain("Compress-Archive");
     expect(workflow).toContain("application.exe.zip");
+    expect(workflow).toContain(
+      'Get-ChildItem "src-tauri\\target" -Recurse -File -Filter "pake-*.exe"',
+    );
+    expect(workflow).not.toContain('Get-ChildItem -File -Filter "*.exe"');
     expect(workflow).toContain("ditto -c -k");
     expect(workflow).toContain("& $light -sval");
     expect(workflow).toContain("Build offline EXE wrapper (Windows)");
