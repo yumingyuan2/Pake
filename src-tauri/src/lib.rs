@@ -3,6 +3,14 @@
 mod app;
 #[cfg(feature = "online-bootstrap")]
 mod online;
+#[cfg(all(
+    target_os = "windows",
+    any(
+        test,
+        all(feature = "online-payload", not(feature = "online-bootstrap"))
+    )
+))]
+mod online_payload;
 #[cfg(not(feature = "online-bootstrap"))]
 mod util;
 
@@ -211,6 +219,13 @@ pub fn run_app() {
 
 #[cfg(not(feature = "online-bootstrap"))]
 pub fn run_app() {
+    #[cfg(all(target_os = "windows", feature = "online-payload"))]
+    if online_payload::redirect_to_bootstrap() {
+        return;
+    }
+    #[cfg(all(target_os = "windows", feature = "online-payload"))]
+    online_payload::set_app_user_model_id();
+
     #[cfg(target_os = "linux")]
     {
         apply_linux_gdk_backend();

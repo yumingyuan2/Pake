@@ -91,6 +91,15 @@ export function createConfigId({ repository, sourceBranch, platform, name }) {
   return `${slugify(name)}-${os}-${digest.slice(0, 10)}`;
 }
 
+export function createPakeIdentifier({ url, name }) {
+  const digest = crypto
+    .createHash("md5")
+    .update(`${url}::${name}`)
+    .digest("hex")
+    .slice(0, 6);
+  return `com.pake.a${digest}`;
+}
+
 export function normalizeReleaseVersion(tagName) {
   const version = String(tagName ?? "")
     .trim()
@@ -212,6 +221,7 @@ export function createBuildConfig(inputs, context) {
     sourceBranch,
     runner: platform,
     os,
+    bundleId: createPakeIdentifier(cliConfig),
     online: onlineMode,
     operation,
     releaseTag: onlineMode ? `pake-online-${stableId}` : null,
@@ -258,9 +268,15 @@ export function loadRegistryConfigs(directory, sourceBranch) {
     .readdirSync(directory)
     .filter((file) => file.endsWith(".json"))
     .sort()
-    .map((file) =>
-      JSON.parse(fs.readFileSync(path.join(directory, file), "utf8")),
-    )
+    .map((file) => {
+      const config = JSON.parse(
+        fs.readFileSync(path.join(directory, file), "utf8"),
+      );
+      return {
+        ...config,
+        bundleId: config.bundleId ?? createPakeIdentifier(config.cliConfig),
+      };
+    })
     .filter(
       (config) =>
         config.schemaVersion === ONLINE_CONFIG_SCHEMA_VERSION &&

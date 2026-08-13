@@ -64,6 +64,8 @@ webview2-com = "0.38"
 cli-build = []
 # Internal GitHub Actions build mode for the silent online bootstrap.
 online-bootstrap = ["dep:sha2", "dep:zip"]
+# Internal Windows payload mode that preserves the bootstrap as the only entrypoint.
+online-payload = []
 # Tauri's macOS proxy APIs require macOS 14 or later. The CLI enables this
 # feature only after checking the host Darwin version.
 macos-proxy = ["tauri/macos-proxy"]

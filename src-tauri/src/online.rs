@@ -17,6 +17,8 @@ const STALE_UPDATE_LOCK_AGE: Duration = Duration::from_secs(30 * 60);
 const USER_AGENT: &str = "pake-online-bootstrap/1";
 const CHINA_TRACE_URL: &str = "https://www.cloudflare.com/cdn-cgi/trace";
 const GITHUB_PROXY_PREFIX: &str = "https://v4.gh-proxy.org/";
+const BOOTSTRAP_MARKER: &str = "bootstrap.json";
+const PAYLOAD_LAUNCH_ENV: &str = "PAKE_ONLINE_PAYLOAD_LAUNCH";
 
 #[derive(Debug, Clone)]
 struct ReleaseChannel {
@@ -24,6 +26,8 @@ struct ReleaseChannel {
     release_tag: String,
     config_id: String,
     os: String,
+    product_name: String,
+    bundle_id: String,
 }
 
 impl ReleaseChannel {
@@ -42,6 +46,14 @@ impl ReleaseChannel {
                 .trim()
                 .to_string(),
             os: option_env!("PAKE_ONLINE_OS")
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            product_name: option_env!("PAKE_ONLINE_PRODUCT_NAME")
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            bundle_id: option_env!("PAKE_ONLINE_BUNDLE_ID")
                 .unwrap_or_default()
                 .trim()
                 .to_string(),
@@ -67,6 +79,17 @@ impl ReleaseChannel {
         }
         if self.os != current_os() {
             return Err("The embedded online channel targets another operating system.".into());
+        }
+        if self.product_name.is_empty()
+            || self.product_name.len() > 200
+            || self.product_name.chars().any(char::is_control)
+            || self.bundle_id.is_empty()
+            || self.bundle_id.len() > 128
+            || !self.bundle_id.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '.')
+            })
+        {
+            return Err("The embedded online application identity is invalid.".into());
         }
         Ok(())
     }
@@ -261,6 +284,12 @@ struct ActiveState {
     launch_kind: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapMarker {
+    executable: PathBuf,
+}
+
 struct UpdateLock {
     path: PathBuf,
 }
@@ -305,6 +334,12 @@ async fn run_async(channel: &ReleaseChannel) -> Result<(), String> {
     let root = cache_root(channel)?;
     fs::create_dir_all(root.join("versions"))
         .map_err(|error| format!("Failed to create the online cache: {error}"))?;
+    let bootstrap = installed_bootstrap_path()?;
+    write_bootstrap_marker(&root, &bootstrap)?;
+    #[cfg(target_os = "windows")]
+    if let Err(error) = repair_windows_shortcuts(channel, &root, &bootstrap) {
+        log_error(channel, &error);
+    }
 
     let current = load_state(&root).filter(|state| state_is_usable(&root, state));
     let launched = if let Some(state) = &current {
@@ -362,6 +397,119 @@ async fn run_async(channel: &ReleaseChannel) -> Result<(), String> {
     }
     cleanup_versions(&root, &keep);
     Ok(())
+}
+
+fn installed_bootstrap_path() -> Result<PathBuf, String> {
+    #[cfg(target_os = "linux")]
+    if let Some(appimage) = std::env::var_os("APPIMAGE").map(PathBuf::from) {
+        if appimage.is_absolute() && appimage.is_file() {
+            return Ok(appimage);
+        }
+    }
+    std::env::current_exe()
+        .map_err(|error| format!("Failed to resolve the installed online bootstrap: {error}"))
+}
+
+fn write_bootstrap_marker(root: &Path, executable: &Path) -> Result<(), String> {
+    let marker = BootstrapMarker {
+        executable: executable.to_path_buf(),
+    };
+    let bytes = serde_json::to_vec_pretty(&marker)
+        .map_err(|error| format!("Failed to serialize the bootstrap marker: {error}"))?;
+    let temporary = root.join("bootstrap.json.tmp");
+    let destination = root.join(BOOTSTRAP_MARKER);
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("Failed to stage the bootstrap marker: {error}"))?;
+    if destination.exists() {
+        fs::remove_file(&destination)
+            .map_err(|error| format!("Failed to replace the bootstrap marker: {error}"))?;
+    }
+    fs::rename(&temporary, &destination)
+        .map_err(|error| format!("Failed to activate the bootstrap marker: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+fn repair_windows_shortcuts(
+    channel: &ReleaseChannel,
+    root: &Path,
+    bootstrap: &Path,
+) -> Result<(), String> {
+    const SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+$shell = New-Object -ComObject WScript.Shell
+$product = $env:PAKE_ONLINE_SHORTCUT_PRODUCT
+$master = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\$product\$product.lnk"
+$onlineRoot = [IO.Path]::GetFullPath($env:PAKE_ONLINE_SHORTCUT_ROOT).TrimEnd('\') + '\'
+$legacyRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Pake\Apps\$env:PAKE_ONLINE_SHORTCUT_CONFIG_ID")).TrimEnd('\') + '\'
+$bootstrap = [IO.Path]::GetFullPath($env:PAKE_ONLINE_SHORTCUT_BOOTSTRAP)
+$locations = @(
+  [Environment]::GetFolderPath('Desktop'),
+  [Environment]::GetFolderPath('StartMenu'),
+  [Environment]::GetFolderPath('Startup'),
+  (Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned')
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+foreach ($location in $locations) {
+  Get-ChildItem -LiteralPath $location -Recurse -File -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+      $shortcut = $shell.CreateShortcut($_.FullName)
+      if (-not $shortcut.TargetPath) { return }
+      $target = [IO.Path]::GetFullPath($shortcut.TargetPath)
+      $isPayload = $target.StartsWith($onlineRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $target.StartsWith($legacyRoot, [StringComparison]::OrdinalIgnoreCase)
+      if (-not $isPayload) { return }
+      $copied = $false
+      if (Test-Path -LiteralPath $master) {
+        try {
+          Copy-Item -LiteralPath $master -Destination $_.FullName -Force
+          $copied = $true
+        } catch {
+          Write-Warning "Failed to copy the canonical shortcut to '$($_.FullName)': $_"
+        }
+      }
+      if (-not $copied) {
+        $shortcut.TargetPath = $bootstrap
+        $shortcut.Description = "Runs $product"
+        $shortcut.IconLocation = "$bootstrap,0"
+        $shortcut.WorkingDirectory = Split-Path -Parent $bootstrap
+        $shortcut.Arguments = ''
+        $shortcut.Save()
+      }
+    } catch {
+      Write-Warning "Failed to repair shortcut '$($_.FullName)': $_"
+    }
+  }
+}
+"#;
+
+    let mut command = Command::new("powershell.exe");
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            SCRIPT,
+        ])
+        .env("PAKE_ONLINE_SHORTCUT_PRODUCT", &channel.product_name)
+        .env("PAKE_ONLINE_SHORTCUT_CONFIG_ID", &channel.config_id)
+        .env("PAKE_ONLINE_SHORTCUT_ROOT", root)
+        .env("PAKE_ONLINE_SHORTCUT_BOOTSTRAP", bootstrap);
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let status = command
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|error| format!("Failed to repair online shortcuts: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Online shortcut repair exited with code {}.",
+            status.code().unwrap_or(-1)
+        ))
+    }
 }
 
 fn cache_root(channel: &ReleaseChannel) -> Result<PathBuf, String> {
@@ -889,6 +1037,7 @@ fn launch(root: &Path, state: &ActiveState) -> Result<(), String> {
     }
 
     command
+        .env(PAYLOAD_LAUNCH_ENV, "1")
         .spawn()
         .map_err(|error| format!("Failed to launch the cached application: {error}"))?;
     Ok(())
@@ -950,6 +1099,8 @@ mod tests {
             release_tag: "pake-online-example".into(),
             config_id: "example-windows-123".into(),
             os: current_os().into(),
+            product_name: "Example App".into(),
+            bundle_id: "com.pake.example".into(),
         }
     }
 

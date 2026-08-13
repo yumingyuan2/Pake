@@ -1509,6 +1509,9 @@ class BaseBuilder {
         if (process.env.PAKE_ONLINE_BOOTSTRAP === '1') {
             features.push('online-bootstrap');
         }
+        if (this.isWindowsOnlinePayloadBuild()) {
+            features.push('online-payload');
+        }
         // Add macos-proxy feature for modern macOS (Darwin 23+ = macOS 14+)
         if (IS_MAC) {
             const macOSVersion = this.getMacOSMajorVersion();

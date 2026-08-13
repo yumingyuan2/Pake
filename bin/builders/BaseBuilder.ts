@@ -469,6 +469,10 @@ export default abstract class BaseBuilder {
       features.push('online-bootstrap');
     }
 
+    if (this.isWindowsOnlinePayloadBuild()) {
+      features.push('online-payload');
+    }
+
     // Add macos-proxy feature for modern macOS (Darwin 23+ = macOS 14+)
     if (IS_MAC) {
       const macOSVersion = this.getMacOSMajorVersion();

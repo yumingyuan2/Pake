@@ -8,6 +8,7 @@ import {
   createBootstrapCliConfig,
   createBuildConfig,
   createConfigId,
+  createPakeIdentifier,
   createMatrix,
   loadRegistryConfigs,
   normalizeReleaseVersion,
@@ -102,6 +103,15 @@ describe("Pake online build configuration", () => {
     expect(createConfigId({ ...value, sourceBranch: "release" })).not.toBe(
       createConfigId(value),
     );
+  });
+
+  it("matches the CLI application identifier for Unicode app names", () => {
+    expect(
+      createPakeIdentifier({
+        url: "https://xzexpress.092714.xyz/",
+        name: "小振快递",
+      }),
+    ).toBe("com.pake.a4fa72b");
   });
 
   it("normalizes workflow values and independent Windows EXE icons", () => {
@@ -444,6 +454,9 @@ describe("Build App With Pake CLI online workflow", () => {
     expect(workflow).toContain('ONLINE_CONFIG_BRANCH: "pake-online-config"');
     expect(workflow).toContain("PAKE_ONLINE_BOOTSTRAP");
     expect(workflow).toContain("PAKE_WINDOWS_ONLINE_PAYLOAD");
+    expect(workflow).toContain(
+      "PAKE_ONLINE_BUNDLE_ID: ${{ matrix.config.bundleId }}",
+    );
     expect(workflow).toContain("pake-bootstrap-cli-config.json");
     expect(workflow).toContain("Compress-Archive");
     expect(workflow).toContain("application.exe.zip");
@@ -481,6 +494,55 @@ describe("Build App With Pake CLI online workflow", () => {
     expect(windowsConfig.bundle.windows.wix.language).toEqual({
       "en-US": { localePath: "assets/en-US.wxl" },
     });
+  });
+
+  it("keeps every Windows shortcut on the installed bootstrap identity", () => {
+    const wixTemplate = fs.readFileSync(
+      path.join(process.cwd(), "src-tauri/assets/main.wxs"),
+      "utf8",
+    );
+    const shortcuts = [
+      "ApplicationDesktopShortcut",
+      "ApplicationStartMenuShortcut",
+    ].map((id) => {
+      const match = wixTemplate.match(
+        new RegExp(`<Shortcut Id="${id}"[\\s\\S]*?</Shortcut>`),
+      );
+      expect(match, `${id} must be an explicit shortcut`).not.toBeNull();
+      return match[0];
+    });
+
+    for (const shortcut of shortcuts) {
+      expect(shortcut).toContain('Description="Runs {{product_name}}"');
+      expect(shortcut).toContain('Target="[!Path]"');
+      expect(shortcut).toContain('Icon="ProductIcon"');
+      expect(shortcut).toContain('IconIndex="0"');
+      expect(shortcut).toContain('WorkingDirectory="INSTALLDIR"');
+      expect(shortcut).toContain(
+        '<ShortcutProperty Key="System.AppUserModel.ID" Value="{{bundle_id}}"/>',
+      );
+    }
+
+    const payloadRuntime = fs.readFileSync(
+      path.join(process.cwd(), "src-tauri/src/online_payload.rs"),
+      "utf8",
+    );
+    expect(payloadRuntime).toContain("SetCurrentProcessExplicitAppUserModelID");
+    expect(payloadRuntime).toContain("redirect_to_bootstrap");
+
+    const bootstrapRuntime = fs.readFileSync(
+      path.join(process.cwd(), "src-tauri/src/online.rs"),
+      "utf8",
+    );
+    expect(bootstrapRuntime).toContain("repair_windows_shortcuts");
+    expect(bootstrapRuntime).toContain(
+      '$shortcut.Description = "Runs $product"',
+    );
+    expect(bootstrapRuntime).toContain(
+      '$shortcut.IconLocation = "$bootstrap,0"',
+    );
+    expect(bootstrapRuntime).toContain("User Pinned");
+    expect(bootstrapRuntime).toContain("Microsoft\\Windows\\Start Menu");
   });
 
   it("publishes payload and bootstrap before the completed manifest", () => {

@@ -349,7 +349,9 @@ describe('BaseBuilder guards', () => {
     } as any);
     process.env.PAKE_WINDOWS_ONLINE_PAYLOAD = '1';
 
-    expect((builder as any).getBuildCommand('pnpm')).toContain('--no-bundle');
+    const command = (builder as any).getBuildCommand('pnpm');
+    expect(command).toContain('--features cli-build,online-payload');
+    expect(command).toContain('--no-bundle');
   });
 
   it('copies Windows build artifacts from CARGO_TARGET_DIR when it is set', () => {

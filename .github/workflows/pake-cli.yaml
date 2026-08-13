@@ -340,6 +340,7 @@ jobs:
         timeout-minutes: 25
         env:
           PAKE_WINDOWS_ONLINE_PAYLOAD: "1"
+          PAKE_ONLINE_BUNDLE_ID: ${{ matrix.config.bundleId }}
         run: node dist/cli.js --config "$env:PAKE_CLI_CONFIG"
 
       - name: Build online application payload (macOS/Linux)
@@ -521,6 +522,8 @@ jobs:
           PAKE_ONLINE_RELEASE_TAG: ${{ matrix.config.releaseTag }}
           PAKE_ONLINE_CONFIG_ID: ${{ matrix.config.id }}
           PAKE_ONLINE_OS: ${{ matrix.config.os }}
+          PAKE_ONLINE_PRODUCT_NAME: ${{ matrix.config.cliConfig.name }}
+          PAKE_ONLINE_BUNDLE_ID: ${{ matrix.config.bundleId }}
         run: |
           $buildStarted = (Get-Date).AddSeconds(-2)
           node dist/cli.js --config "$env:PAKE_BOOTSTRAP_CLI_CONFIG"
@@ -589,6 +592,8 @@ jobs:
           PAKE_ONLINE_RELEASE_TAG: ${{ matrix.config.releaseTag }}
           PAKE_ONLINE_CONFIG_ID: ${{ matrix.config.id }}
           PAKE_ONLINE_OS: ${{ matrix.config.os }}
+          PAKE_ONLINE_PRODUCT_NAME: ${{ matrix.config.cliConfig.name }}
+          PAKE_ONLINE_BUNDLE_ID: ${{ matrix.config.bundleId }}
         shell: bash
         run: |
           node dist/cli.js --config "$PAKE_BOOTSTRAP_CLI_CONFIG"
@@ -609,6 +614,8 @@ jobs:
           PAKE_ONLINE_RELEASE_TAG: ${{ matrix.config.releaseTag }}
           PAKE_ONLINE_CONFIG_ID: ${{ matrix.config.id }}
           PAKE_ONLINE_OS: ${{ matrix.config.os }}
+          PAKE_ONLINE_PRODUCT_NAME: ${{ matrix.config.cliConfig.name }}
+          PAKE_ONLINE_BUNDLE_ID: ${{ matrix.config.bundleId }}
         shell: bash
         run: |
           node dist/cli.js --config "$PAKE_BOOTSTRAP_CLI_CONFIG"
