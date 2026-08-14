@@ -11,6 +11,8 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
+        { "url": "sms:*" },
+        { "url": "geo:*" },
         { "url": "tencent://ntqq-open[?]*" },
         { "url": "mqqapi://userprofile/friend_profile_card[?]*" },
         { "url": "mqq://card/show_pslcard[?]*" }
