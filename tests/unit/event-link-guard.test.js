@@ -146,6 +146,26 @@ function makeClickEvent(anchor) {
 }
 
 describe("event link guard", () => {
+  it("grants only the supported QQ protocol entry points", () => {
+    const capability = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), "src-tauri/capabilities/default.json"),
+        "utf-8",
+      ),
+    );
+    const openerPermission = capability.permissions.find(
+      (permission) =>
+        typeof permission === "object" &&
+        permission.identifier === "opener:allow-open-url",
+    );
+
+    expect(openerPermission.allow).toEqual([
+      { url: "tencent://ntqq-open[?]*" },
+      { url: "mqqapi://userprofile/friend_profile_card[?]*" },
+      { url: "mqq://card/show_pslcard[?]*" },
+    ]);
+  });
+
   it("falls back from malformed saved zoom values", () => {
     const context = loadEventHelpers({
       withTauri: true,
@@ -538,8 +558,26 @@ describe("event link guard", () => {
     expect(event.preventDefault).toHaveBeenCalled();
     expect(event.stopImmediatePropagation).toHaveBeenCalled();
     expect(context.invokeCalls).toContainEqual([
-      "plugin:shell|open",
-      { path: "https://other.example.org/page" },
+      "plugin:opener|open_url",
+      { url: "https://other.example.org/page" },
+    ]);
+  });
+
+  it("opens supported QQ links with the native protocol handler", () => {
+    const context = loadEventHelpers({ withTauri: true });
+    context.window.pakeConfig = { new_window: false };
+    runDomReady(context);
+
+    const qqUrl =
+      "tencent://ntqq-open?subcmd=OpenRobotProfile&robot_uin=962283577";
+    const event = makeClickEvent(makeAnchor(qqUrl, "_self"));
+    getClickGuard(context)(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopImmediatePropagation).toHaveBeenCalled();
+    expect(context.invokeCalls).toContainEqual([
+      "plugin:opener|open_url",
+      { url: qqUrl },
     ]);
   });
 
